@@ -109,7 +109,7 @@ f := to.F64Or(x, 0.0)
 
 ### Generic conversion
 
-For target types not covered by the outcome-named shortcuts — `int64`, `float32`, `time.Duration`, etc. — reach for `Type[T]`:
+For target types not covered by the outcome-named shortcuts — `int64`, `float32`, `time.Duration`, user-defined named numeric types, etc. — reach for `Type[T]`:
 
 ```go
 id, err := to.Type[int64](userMap["id"])
@@ -117,6 +117,14 @@ if err != nil { /* handle */ }
 
 bytes, err := to.Type[int64]("4096")
 if err != nil { /* handle */ }
+
+// time.Duration accepts Go duration strings ("5s", "1h30m") or numeric sources.
+timeout, err := to.Type[time.Duration]("5s")
+
+// User-defined named numeric types are supported via the reflect fallback,
+// with range-checking against the underlying kind.
+type Port uint16
+p, err := to.Type[Port]("8080")
 ```
 
 `Type[T]` returns `(T, error)` so you get full error context on failure. For the same "fallback on failure" ergonomics as the outcome-named funcs, use `TypeOr[T]`:
@@ -175,9 +183,12 @@ This is the language-level replacement for `to.Ptr`, `lo.ToPtr`, `ptr.To`, and s
 ## 🛡️ Safety guarantees
 
 - **Never panics.** `nil` inputs, wrong types, unparseable strings, and nil pointers all return zero values, fallbacks, or `ConversionError` — never a panic.
+- **No float→int trap values.** `NaN`, `±Inf`, and out-of-range floats are rejected rather than silently becoming `INT64_MIN` (the default Go behavior for `int(math.NaN())` on amd64).
+- **No silent float32 overflow.** `Type[float32]` of a value exceeding `math.MaxFloat32` returns a `ConversionError` rather than `±Inf`.
+- **32-bit-safe.** `Type[int]` range-checks `int64` and `uint32` sources against `math.MaxInt` / `math.MinInt`, so conversions behave correctly on `GOARCH=386`/`arm`/`wasm` as well as 64-bit platforms.
 - **Immutable.** `to` never modifies input values.
 - **Zero dependencies.** Pure stdlib.
-- **No reflection on the happy path.** Outcome-named conversions use concrete type switches.
+- **No reflection on the happy path.** Outcome-named conversions and the common `Type[T]` targets use concrete type switches; reflection is used only for the named-numeric-type fallback (`time.Duration`, `type Port int64`, …).
 
 ## 🏎️ Performance
 

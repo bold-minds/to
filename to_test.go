@@ -2,7 +2,9 @@ package to_test
 
 import (
 	"errors"
+	"math"
 	"testing"
+	"time"
 
 	"github.com/bold-minds/to"
 )
@@ -493,6 +495,352 @@ func TestType_Float32_BadString(t *testing.T) {
 	_, err := to.Type[float32]("abc")
 	if err == nil {
 		t.Fatal("expected error for float32 bad string")
+	}
+	var cerr *to.ConversionError
+	if !errors.As(err, &cerr) {
+		t.Fatal("expected *ConversionError")
+	}
+	if cerr.To != "float32" {
+		t.Errorf("To=%q, want float32", cerr.To)
+	}
+}
+
+func TestType_Float32_OverflowFromFloat64(t *testing.T) {
+	// A float64 value that exceeds the float32 range should be rejected
+	// rather than silently becoming ±Inf.
+	_, err := to.Type[float32](1e40)
+	if err == nil {
+		t.Fatal("expected overflow error for 1e40 → float32")
+	}
+	var cerr *to.ConversionError
+	if !errors.As(err, &cerr) || cerr.To != "float32" {
+		t.Errorf("want *ConversionError with To=float32, got %T %+v", err, err)
+	}
+
+	_, err = to.Type[float32](-1e40)
+	if err == nil {
+		t.Fatal("expected overflow error for -1e40 → float32")
+	}
+}
+
+func TestType_Float32_OverflowFromString(t *testing.T) {
+	_, err := to.Type[float32]("1e40")
+	if err == nil {
+		t.Fatal("expected overflow error for \"1e40\" → float32")
+	}
+}
+
+func TestType_Int_NaNInfRejected(t *testing.T) {
+	// NaN, ±Inf, and out-of-range floats must error out rather than
+	// producing INT64_MIN (the default Go amd64 behavior for int(NaN)).
+	cases := map[string]float64{
+		"NaN":     math.NaN(),
+		"+Inf":    math.Inf(1),
+		"-Inf":    math.Inf(-1),
+		"too big": 1e20,
+		"too sml": -1e20,
+	}
+	for name, v := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := to.Type[int](v)
+			if err == nil {
+				t.Fatalf("expected error for Type[int](%v)", v)
+			}
+			var cerr *to.ConversionError
+			if !errors.As(err, &cerr) {
+				t.Fatalf("expected *ConversionError, got %T", err)
+			}
+		})
+	}
+}
+
+func TestInt_NaNInfReturnsZero(t *testing.T) {
+	// The outcome-named shortcut swallows the error but should return 0
+	// (a predictable sentinel) rather than INT64_MIN.
+	if got := to.Int(math.NaN()); got != 0 {
+		t.Errorf("to.Int(NaN) = %d, want 0", got)
+	}
+	if got := to.Int(math.Inf(1)); got != 0 {
+		t.Errorf("to.Int(+Inf) = %d, want 0", got)
+	}
+	if got := to.Int(math.Inf(-1)); got != 0 {
+		t.Errorf("to.Int(-Inf) = %d, want 0", got)
+	}
+	if got := to.Int(1e20); got != 0 {
+		t.Errorf("to.Int(1e20) = %d, want 0", got)
+	}
+}
+
+func TestType_Duration_FromString(t *testing.T) {
+	// time.Duration has underlying type int64 but is a named type, so the
+	// concrete type switch in Type[T] does NOT match it. The reflect-based
+	// fallback must handle it, and strings like "5s" must parse via
+	// time.ParseDuration.
+	got, err := to.Type[time.Duration]("5s")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != 5*time.Second {
+		t.Errorf("got %v, want 5s", got)
+	}
+
+	got, err = to.Type[time.Duration]("1h30m")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != 90*time.Minute {
+		t.Errorf("got %v, want 1h30m", got)
+	}
+}
+
+func TestType_Duration_FromInt64(t *testing.T) {
+	// Numeric sources should populate the underlying int64 directly (same
+	// semantics as time.Duration(5_000_000_000)).
+	got, err := to.Type[time.Duration](int64(5_000_000_000))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != 5*time.Second {
+		t.Errorf("got %v, want 5s", got)
+	}
+}
+
+func TestType_Duration_BadString(t *testing.T) {
+	_, err := to.Type[time.Duration]("not a duration")
+	if err == nil {
+		t.Fatal("expected error for bad duration string")
+	}
+}
+
+// NamedInt is a user-defined named integer type used to verify that Type[T]
+// supports arbitrary named numeric types, not just time.Duration.
+type NamedInt int64
+
+func TestType_NamedInt(t *testing.T) {
+	got, err := to.Type[NamedInt]("42")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != 42 {
+		t.Errorf("got %v, want 42", got)
+	}
+
+	got, err = to.Type[NamedInt](int32(42))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != 42 {
+		t.Errorf("got %v, want 42", got)
+	}
+}
+
+// NamedInt8 verifies that the reflect-based path correctly range-checks
+// narrower underlying kinds.
+type NamedInt8 int8
+
+func TestType_NamedInt8_Overflow(t *testing.T) {
+	_, err := to.Type[NamedInt8](int(300))
+	if err == nil {
+		t.Fatal("expected overflow error: 300 does not fit in int8")
+	}
+}
+
+// NamedUint verifies the uint branch of the reflect fallback rejects
+// negative inputs.
+type NamedUint uint32
+
+func TestType_NamedUint_NegativeRejected(t *testing.T) {
+	_, err := to.Type[NamedUint](-1)
+	if err == nil {
+		t.Fatal("expected error for negative → unsigned named type")
+	}
+}
+
+func TestType_Any_Nil(t *testing.T) {
+	// When T is interface{} (any), Type[any](nil) should return (nil, nil)
+	// via the fast path — a nil any trivially satisfies any.
+	got, err := to.Type[any](nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if got != nil {
+		t.Errorf("got %v, want nil", got)
+	}
+
+	// And a non-nil any should round-trip unchanged.
+	got, err = to.Type[any](42)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if got != 42 {
+		t.Errorf("got %v, want 42", got)
+	}
+}
+
+func TestInt_NegativeFloatTruncation(t *testing.T) {
+	// Complement to the existing positive-float truncation test: -42.9
+	// must truncate toward zero (→ -42), matching Go's float→int rules.
+	if got := to.Int(-42.9); got != -42 {
+		t.Errorf("to.Int(-42.9) = %d, want -42", got)
+	}
+}
+
+func TestBool_MixedCaseString(t *testing.T) {
+	// With the switch to strconv.ParseBool + strings.EqualFold, unusual
+	// casings like tRuE and yEs should be accepted.
+	cases := map[string]bool{
+		"tRuE": true,
+		"FaLsE": false,
+		"yEs":  true,
+		"nO":   false,
+		"oN":   true,
+		"oFf":  false,
+	}
+	for in, want := range cases {
+		t.Run(in, func(t *testing.T) {
+			got, err := to.Type[bool](in)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestStr_AllNumericKinds(t *testing.T) {
+	// Covers every branch of the strconv fast path in Str.
+	cases := []struct {
+		in   any
+		want string
+	}{
+		{int8(-8), "-8"},
+		{int16(-16), "-16"},
+		{int32(-32), "-32"},
+		{int64(-64), "-64"},
+		{uint(1), "1"},
+		{uint8(8), "8"},
+		{uint16(16), "16"},
+		{uint32(32), "32"},
+		{uint64(64), "64"},
+		{float32(1.5), "1.5"},
+		{float64(2.5), "2.5"},
+	}
+	for _, tc := range cases {
+		got := to.Str(tc.in)
+		if got != tc.want {
+			t.Errorf("Str(%v %T) = %q, want %q", tc.in, tc.in, got, tc.want)
+		}
+	}
+	// Unknown type falls back to fmt.Sprintf("%v", …).
+	type thing struct{ X int }
+	if got := to.Str(thing{7}); got != "{7}" {
+		t.Errorf("Str(thing{7}) = %q, want {7}", got)
+	}
+}
+
+// NamedFloat exercises the reflect Float branch of convertNamed.
+type NamedFloat float32
+
+func TestType_NamedFloat(t *testing.T) {
+	got, err := to.Type[NamedFloat](3.5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != 3.5 {
+		t.Errorf("got %v, want 3.5", got)
+	}
+}
+
+func TestType_NamedFloat_Overflow(t *testing.T) {
+	// float32 range overflow via the reflect path.
+	_, err := to.Type[NamedFloat](1e40)
+	if err == nil {
+		t.Fatal("expected overflow error")
+	}
+}
+
+func TestType_NamedFloat_BadSource(t *testing.T) {
+	_, err := to.Type[NamedFloat]([]int{1})
+	if err == nil {
+		t.Fatal("expected error for slice source")
+	}
+}
+
+func TestType_NamedUint_Overflow(t *testing.T) {
+	// uint8 only holds 0-255.
+	type u8 uint8
+	_, err := to.Type[u8](int(300))
+	if err == nil {
+		t.Fatal("expected overflow error")
+	}
+}
+
+func TestType_NamedUint_FromString(t *testing.T) {
+	type Port uint16
+	got, err := to.Type[Port]("8080")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != 8080 {
+		t.Errorf("got %v, want 8080", got)
+	}
+}
+
+func TestType_NamedInt_BadSource(t *testing.T) {
+	_, err := to.Type[NamedInt]([]int{1})
+	if err == nil {
+		t.Fatal("expected error for slice source")
+	}
+}
+
+func TestType_NamedInt_NaN(t *testing.T) {
+	_, err := to.Type[NamedInt](math.NaN())
+	if err == nil {
+		t.Fatal("expected NaN error")
+	}
+}
+
+func TestType_UnsupportedTarget_Struct(t *testing.T) {
+	// Struct targets fall through convertNamed's default branch to the
+	// generic "unsupported conversion" error.
+	type custom struct{ X int }
+	_, err := to.Type[custom]("hello")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var cerr *to.ConversionError
+	if !errors.As(err, &cerr) {
+		t.Fatal("expected *ConversionError")
+	}
+}
+
+func TestToBool_UnsupportedSource(t *testing.T) {
+	type thing struct{ X int }
+	_, err := to.Type[bool](thing{1})
+	if err == nil {
+		t.Fatal("expected error for struct source")
+	}
+}
+
+func TestType_Duration_NumericOverflowViaString(t *testing.T) {
+	// Strings that aren't valid Go durations AND aren't integers should
+	// fail cleanly.
+	_, err := to.Type[time.Duration]("5x")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestStrOr_NonNilStructUsesSprintf(t *testing.T) {
+	// Documented behavior: StrOr returns fallback ONLY when v is nil.
+	// Any non-nil value (including arbitrary structs) is formatted via
+	// Str/fmt.Sprintf and the fallback is unreachable.
+	type point struct{ X, Y int }
+	got := to.StrOr(point{1, 2}, "fallback")
+	if got == "fallback" {
+		t.Errorf("fallback should be unreachable for non-nil v, got %q", got)
 	}
 }
 
