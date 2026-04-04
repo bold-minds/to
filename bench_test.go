@@ -1,44 +1,100 @@
-package oss
+package to_test
 
 import (
 	"testing"
+
+	"github.com/bold-minds/to"
 )
 
-// BenchmarkExampleFunction demonstrates benchmark testing for functions
-func BenchmarkExampleFunction(b *testing.B) {
-	input := "benchmark test input"
-	b.ResetTimer()
-	
+func BenchmarkStr_String(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_ = ExampleFunction(input)
+		_ = to.Str("hello")
 	}
 }
 
-// BenchmarkExampleStruct_Process demonstrates benchmark testing for methods
-func BenchmarkExampleStruct_Process(b *testing.B) {
-	example := NewExampleStruct("benchmark", 100)
-	b.ResetTimer()
-	
+func BenchmarkStr_Int(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_ = example.Process()
+		_ = to.Str(42)
 	}
 }
 
-// BenchmarkExampleStruct_Validate demonstrates benchmark testing for validation
-func BenchmarkExampleStruct_Validate(b *testing.B) {
-	example := NewExampleStruct("benchmark", 100)
-	b.ResetTimer()
-	
+func BenchmarkInt_FromString(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_ = example.Validate()
+		_ = to.Int("42")
 	}
 }
 
-// BenchmarkNewExampleStruct demonstrates benchmark testing for constructors
-func BenchmarkNewExampleStruct(b *testing.B) {
-	b.ResetTimer()
-	
+func BenchmarkInt_FromFloat(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_ = NewExampleStruct("benchmark", i)
+		_ = to.Int(42.0)
+	}
+}
+
+func BenchmarkInt_FromInt(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_ = to.Int(42)
+	}
+}
+
+func BenchmarkBool_FromString(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_ = to.Bool("true")
+	}
+}
+
+func BenchmarkBool_FromInt(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_ = to.Bool(1)
+	}
+}
+
+func BenchmarkF64_FromString(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_ = to.F64("3.14")
+	}
+}
+
+func BenchmarkF64_FromInt(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_ = to.F64(42)
+	}
+}
+
+func BenchmarkIntOr_Success(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_ = to.IntOr("42", 0)
+	}
+}
+
+func BenchmarkIntOr_Fallback(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_ = to.IntOr("abc", 99)
+	}
+}
+
+func BenchmarkType_Int(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		_, _ = to.Type[int]("42")
+	}
+}
+
+func BenchmarkVal(b *testing.B) {
+	s := "hello"
+	for i := 0; i < b.N; i++ {
+		_ = to.Val(&s)
+	}
+}
+
+func BenchmarkValOr_NonNil(b *testing.B) {
+	s := "hello"
+	for i := 0; i < b.N; i++ {
+		_ = to.ValOr(&s, "default")
+	}
+}
+
+func BenchmarkValOr_Nil(b *testing.B) {
+	var p *string
+	for i := 0; i < b.N; i++ {
+		_ = to.ValOr(p, "default")
 	}
 }

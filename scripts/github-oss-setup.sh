@@ -13,7 +13,7 @@
 # We handle errors explicitly in each section
 
 REPO_OWNER="bold-minds"
-REPO_NAME="oss"
+REPO_NAME="to"
 REPO="$REPO_OWNER/$REPO_NAME"
 
 # Status tracking variables

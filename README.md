@@ -1,148 +1,266 @@
-# [PROJECT_NAME]
+# to
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Go Version](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/bold-minds/oss/main/.github/badges/go-version.json)](https://golang.org/doc/go1.24)
-[![Latest Release](https://img.shields.io/github/v/release/bold-minds/oss?logo=github&color=blueviolet)](https://github.com/bold-minds/oss/releases)
-[![Last Updated](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/bold-minds/oss/main/.github/badges/last-updated.json)](https://github.com/bold-minds/oss/commits)
-[![golangci-lint](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/bold-minds/oss/main/.github/badges/golangci-lint.json)](https://github.com/bold-minds/oss/actions/workflows/test.yaml)
-[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/bold-minds/oss/main/.github/badges/coverage.json)](https://github.com/bold-minds/oss/actions/workflows/test.yaml)
-[![Dependabot](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/bold-minds/oss/main/.github/badges/dependabot.json)](https://github.com/bold-minds/oss/security/dependabot)
+[![Go Reference](https://pkg.go.dev/badge/github.com/bold-minds/to.svg)](https://pkg.go.dev/github.com/bold-minds/to)
+[![Go Version](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/bold-minds/to/main/.github/badges/go-version.json)](https://golang.org/doc/go1.26)
+[![Latest Release](https://img.shields.io/github/v/release/bold-minds/to?logo=github&color=blueviolet)](https://github.com/bold-minds/to/releases)
+[![Last Updated](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/bold-minds/to/main/.github/badges/last-updated.json)](https://github.com/bold-minds/to/commits)
+[![golangci-lint](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/bold-minds/to/main/.github/badges/golangci-lint.json)](https://github.com/bold-minds/to/actions/workflows/test.yaml)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/bold-minds/to/main/.github/badges/coverage.json)](https://github.com/bold-minds/to/actions/workflows/test.yaml)
+[![Dependabot](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/bold-minds/to/main/.github/badges/dependabot.json)](https://github.com/bold-minds/to/security/dependabot)
 
+**Safe Go value conversion — any value, any type, one call.**
 
-[BRIEF_DESCRIPTION_OF_YOUR_PROJECT]
+Go's type system is strict for good reasons, but real-world values arrive untyped or wrong-typed: environment variables are strings, JSON numbers are `float64`, config fields are `any`. `to` gives you one-line conversion to the type you actually need, with fallbacks when conversion fails.
 
-## 🚀 Features
+```go
+// Before
+port := 8080
+if s := os.Getenv("PORT"); s != "" {
+    if p, err := strconv.Atoi(s); err == nil {
+        port = p
+    }
+}
 
-[Replace with your actual features]
+// After
+port := to.IntOr(os.Getenv("PORT"), 8080)
+```
 
-- 🔥 **Feature 1**: Description of feature 1
-- ⚡ **Feature 2**: Description of feature 2
-- 🛡️ **Feature 3**: Description of feature 3
-- 🧪 **Production Ready**: Comprehensive test coverage, robust error handling
+## ✨ Why to?
+
+- 🎯 **Outcome-named** — `to.Int(x)` reads like English, no `[T]` at the call site for common types
+- 🔁 **Consistent fallback pattern** — every conversion has a plain form and an `Or` form with a default
+- 🧭 **Generic escape hatch** — `to.Type[T](x)` handles any target type when the outcome-named shortcuts don't cover it
+- 🧨 **Rich error context** — `ConversionError` tells you the source type, target type, value, and reason
+- 🛡️ **Nil-safe everywhere** — `nil` inputs convert predictably, no panics
+- 🪶 **Tiny** — 12 functions, one file, zero dependencies
+- 🔗 **Pairs with [`bold-minds/dig`](https://github.com/bold-minds/dig)** — dig into nested data, then convert the leaf
 
 ## 📦 Installation
 
 ```bash
-go get github.com/bold-minds/[REPO_NAME]
+go get github.com/bold-minds/to
 ```
 
-## 🎯 Quick Start
+Requires Go 1.26 or later.
+
+## 🚀 Quick Start
 
 ```go
 package main
 
 import (
     "fmt"
-    "github.com/bold-minds/[REPO_NAME]"
+    "os"
+
+    "github.com/bold-minds/to"
 )
 
 func main() {
-    // Replace with your actual usage example
-    result := [PACKAGE_NAME].ExampleFunction("hello")
-    fmt.Println("Result:", result)
-    
-    // Create and use a struct
-    example := [PACKAGE_NAME].NewExampleStruct("demo", 42)
-    fmt.Println("Processed:", example.Process())
+    // Env vars are always strings — convert with a fallback
+    port := to.IntOr(os.Getenv("PORT"), 8080)
+    host := to.StrOr(os.Getenv("HOST"), "localhost")
+    debug := to.BoolOr(os.Getenv("DEBUG"), false)
+
+    fmt.Println(port, host, debug)
+
+    // Config values are often any
+    cfg := map[string]any{"timeout": 30.0, "name": "alice"}
+    timeout := to.IntOr(cfg["timeout"], 60) // float64 → int, fallback 60
+    name := to.StrOr(cfg["name"], "unknown")
+
+    fmt.Println(timeout, name)
+
+    // Generic escape hatch for uncommon types
+    bytes, err := to.Type[int64]("4096")
+    if err != nil {
+        // handle conversion failure
+    }
+    _ = bytes
+
+    // Safe pointer dereferencing
+    var namePtr *string
+    display := to.ValOr(namePtr, "anonymous")
+    fmt.Println(display)
 }
 ```
 
 ## 🔧 Core Features
 
-### [FEATURE_SECTION_1]
+### Outcome-named conversions
+
+Four common target types get outcome-named shortcuts. No `[T]` at the call site — the function name IS the target type.
 
 ```go
-// Replace with your actual code examples
-[YOUR_CODE_EXAMPLE_HERE]
+s := to.Str(x)    // any → string
+i := to.Int(x)    // any → int
+b := to.Bool(x)   // any → bool
+f := to.F64(x)    // any → float64
 ```
 
-### [FEATURE_SECTION_2]
+Each returns the zero value on failure. If you want a different fallback, use the `Or` variant:
 
 ```go
-// Replace with your actual code examples
-[YOUR_CODE_EXAMPLE_HERE]
+s := to.StrOr(x, "default")
+i := to.IntOr(x, 0)
+b := to.BoolOr(x, false)
+f := to.F64Or(x, 0.0)
 ```
 
-### [FEATURE_SECTION_3]
+### Generic conversion
+
+For target types not covered by the outcome-named shortcuts — `int64`, `float32`, `time.Duration`, etc. — reach for `Type[T]`:
 
 ```go
-// Replace with your actual code examples
-[YOUR_CODE_EXAMPLE_HERE]
+id, err := to.Type[int64](userMap["id"])
+if err != nil { /* handle */ }
+
+bytes, err := to.Type[int64]("4096")
+if err != nil { /* handle */ }
 ```
 
-## 🏎️ Performance
-
-[Replace with your actual performance information]
-
-### Benchmarks
-
-Run benchmarks with:
-
-```bash
-go test -bench=. -benchmem
-```
-
-Example output:
-```
-[REPLACE_WITH_YOUR_BENCHMARK_RESULTS]
-```
-
-## 🧪 Testing
-
-Run the test suite:
-
-```bash
-# Run all tests
-go test -v ./...
-
-# Run tests with race detection
-go test -race ./...
-
-# Run benchmarks
-go test -bench=. ./...
-
-# Generate coverage report
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out
-```
-
-## 📚 API Reference
-
-### [YOUR_MAIN_TYPE_OR_INTERFACE]
+`Type[T]` returns `(T, error)` so you get full error context on failure. For the same "fallback on failure" ergonomics as the outcome-named funcs, use `TypeOr[T]`:
 
 ```go
-// Replace with your actual API documentation
-type [YourInterface] interface {
-    [YourMethod1]() [ReturnType]
-    [YourMethod2](param [ParamType]) ([ReturnType], error)
+id := to.TypeOr[int64](userMap["id"], 0)
+timeout := to.TypeOr[int64]("4096", 60)
+```
+
+### Rich error context with `ConversionError`
+
+When conversion fails and you need to know *why*, `Type[T]` returns a `*ConversionError` with structured details:
+
+```go
+_, err := to.Type[int]("not a number")
+if err != nil {
+    var ce *to.ConversionError
+    if errors.As(err, &ce) {
+        fmt.Printf("could not convert %s(%v) to %s: %s\n",
+            ce.From, ce.Value, ce.To, ce.Reason)
+        // could not convert string(not a number) to int: invalid numeric string
+    }
 }
 ```
 
-### Functions
+Fields on `ConversionError`: `From` (source type name), `To` (target type name), `Value` (the original value), `Reason` (human-readable cause), `Cause` (underlying error, if any). Implements `error` and `Unwrap()`, so `errors.Is` and `errors.As` work as expected.
+
+### Pointer dereferencing
+
+Go's strict nil-safety means dereferencing a nullable pointer requires boilerplate. `to.Val` and `to.ValOr` collapse it:
 
 ```go
-// Replace with your actual functions
-func [YourFunction](param [ParamType]) [ReturnType]
+// Without
+var name string
+if namePtr != nil {
+    name = *namePtr
+}
+
+// With
+name := to.Val(namePtr)                 // zero value on nil
+name := to.ValOr(namePtr, "anonymous")  // custom default on nil
+```
+
+### Pointer creation — use `new(v)` from Go 1.26
+
+`to` does **not** provide a `Ptr(v)` function. Go 1.26 extended the `new` builtin to accept expressions, so `new(v)` returns a `*T` pointing at a fresh copy of `v` — no library needed:
+
+```go
+p := new(8080)          // *int pointing at 8080
+s := new("hello")       // *string pointing at "hello"
+t := new(time.Now())    // *time.Time pointing at the current time
+```
+
+This is the language-level replacement for `to.Ptr`, `lo.ToPtr`, `ptr.To`, and similar helpers. `to.Val` / `to.ValOr` exist because Go does not have a language-level safe dereferencing operation.
+
+## 🛡️ Safety guarantees
+
+- **Never panics.** `nil` inputs, wrong types, unparseable strings, and nil pointers all return zero values, fallbacks, or `ConversionError` — never a panic.
+- **Immutable.** `to` never modifies input values.
+- **Zero dependencies.** Pure stdlib.
+- **No reflection on the happy path.** Outcome-named conversions use concrete type switches.
+
+## 🏎️ Performance
+
+Measured on Go 1.26 (Intel Ultra 9 275HX). Happy paths are sub-5 nanosecond with zero allocations; pointer dereferencing is effectively free.
+
+```
+BenchmarkStr_String-24         920353114    0.66 ns/op    0 B/op    0 allocs/op
+BenchmarkStr_Int-24             20948056   27.17 ns/op    2 B/op    1 allocs/op
+BenchmarkInt_FromString-24     149880273    3.82 ns/op    0 B/op    0 allocs/op
+BenchmarkInt_FromFloat-24      263979162    2.07 ns/op    0 B/op    0 allocs/op
+BenchmarkInt_FromInt-24        817980475    0.79 ns/op    0 B/op    0 allocs/op
+BenchmarkBool_FromString-24    226217947    2.39 ns/op    0 B/op    0 allocs/op
+BenchmarkBool_FromInt-24       261220177    2.00 ns/op    0 B/op    0 allocs/op
+BenchmarkF64_FromString-24      44144103   13.63 ns/op    0 B/op    0 allocs/op
+BenchmarkF64_FromInt-24        260099806    2.14 ns/op    0 B/op    0 allocs/op
+BenchmarkIntOr_Success-24      132154460    4.24 ns/op    0 B/op    0 allocs/op
+BenchmarkType_Int-24           165019142    3.77 ns/op    0 B/op    0 allocs/op
+BenchmarkVal-24               1000000000    0.13 ns/op    0 B/op    0 allocs/op
+BenchmarkValOr_NonNil-24      1000000000    0.13 ns/op    0 B/op    0 allocs/op
+BenchmarkValOr_Nil-24         1000000000    0.13 ns/op    0 B/op    0 allocs/op
+```
+
+Error paths allocate (the `ConversionError` struct plus `fmt.Sprintf` for the error message). If you care about error-path performance, prefer the outcome-named functions or their `Or` variants — they skip error construction entirely.
+
+## 🧪 Testing
+
+```bash
+go test ./...                      # unit tests
+go test -race ./...                # race detection
+go test -bench=. -benchmem ./...   # benchmarks
+```
+
+Current coverage: 97.7%.
+
+## 📚 API Reference
+
+```go
+// Outcome-named conversions — return zero on failure.
+func Str(v any) string
+func Int(v any) int
+func Bool(v any) bool
+func F64(v any) float64
+
+// Outcome-named conversions with fallback.
+func StrOr(v any, fallback string) string
+func IntOr(v any, fallback int) int
+func BoolOr(v any, fallback bool) bool
+func F64Or(v any, fallback float64) float64
+
+// Generic conversion. Returns (value, nil) on success,
+// (zero, *ConversionError) on failure.
+func Type[T any](v any) (T, error)
+
+// Generic conversion with fallback. Returns fallback on any failure.
+func TypeOr[T any](v any, fallback T) T
+
+// Safe pointer dereferencing. Val returns zero on nil pointer;
+// ValOr returns fallback on nil pointer.
+func Val[T any](p *T) T
+func ValOr[T any](p *T, fallback T) T
+
+// ConversionError is returned by Type[T] when conversion fails.
+// Implements error and Unwrap() for errors.Is/errors.As compatibility.
+type ConversionError struct {
+    From   string // Source type name
+    To     string // Target type name
+    Value  any    // Original value
+    Reason string // Human-readable reason
+    Cause  error  // Underlying error, if any
+}
 ```
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Bold Minds Go libraries follow a shared set of design principles; read [PRINCIPLES.md](https://github.com/bold-minds/oss/blob/main/PRINCIPLES.md) before opening a PR.
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-[Replace with your actual acknowledgments]
-
-- [Dependency/Library Name](https://github.com/example/repo) - Description of what it provided
-- The Go community for excellent tooling and libraries
+MIT. See [LICENSE](LICENSE).
 
 ## 🔗 Related Projects
 
-[Replace with related projects in your domain]
-
-- [Related Project 1](https://github.com/example/project1) - Description
-- [Related Project 2](https://github.com/example/project2) - Description
+- [`bold-minds/dig`](https://github.com/bold-minds/dig) — nested data navigation. Pairs naturally with `to`: `to.Int(dig.At(data, "count"))` when you need to dig into `any` trees and convert the leaf.
+- [`spf13/cast`](https://github.com/spf13/cast) — the established Go conversion library. Predates generics; uses `ToInt`/`ToIntE`-style naming. `to` is a leaner, generics-first, outcome-named take on the same problem space.
+- Go 1.26 `new(v)` builtin — the language-level replacement for `ptr.To`-style helpers. `to` does not ship a `Ptr` function because the language now provides it.
+- Go standard library `strconv` — the low-level primitive for string ↔ numeric conversions. `to` wraps it with outcome naming and `any` input handling.

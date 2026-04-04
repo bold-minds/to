@@ -2,11 +2,9 @@
 
 ## Supported Versions
 
-We actively support the following versions with security updates:
-
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.x.x   | :white_check_mark: |
+| 0.x.x   | :white_check_mark: |
 
 ## Reporting a Vulnerability
 
@@ -18,9 +16,9 @@ Please do not report security vulnerabilities through public GitHub issues, disc
 
 ### 2. Report Privately
 
-Send an email to **security@boldminds.tech** with the following information:
+Send an email to **security@boldminds.tech** with:
 
-- **Subject**: Security Vulnerability in bold-minds/[REPO_NAME]
+- **Subject**: Security Vulnerability in bold-minds/to
 - **Description**: Detailed description of the vulnerability
 - **Steps to Reproduce**: Clear steps to reproduce the issue
 - **Impact**: Potential impact and severity assessment
@@ -32,56 +30,30 @@ Send an email to **security@boldminds.tech** with the following information:
 - **Status Update**: Within 7 days
 - **Resolution**: Varies based on complexity, typically within 30 days
 
-### 4. Disclosure Process
-
-1. We will acknowledge receipt of your vulnerability report
-2. We will investigate and validate the vulnerability
-3. We will develop and test a fix
-4. We will coordinate disclosure timing with you
-5. We will release a security update
-6. We will publicly acknowledge your responsible disclosure (if desired)
-
 ## Security Considerations
 
-[Replace this section with security considerations specific to your project]
+`to` is a pure-computation library with a very small attack surface:
 
-### [PROJECT_SPECIFIC_SECURITY_SECTION]
+- **No network I/O.** `to` does not make network calls.
+- **No file I/O.** `to` does not read or write files.
+- **No reflection on the happy path.** Type dispatch uses concrete type switches.
+- **No external dependencies.** Pure Go stdlib.
+- **Immutable.** `to` never modifies input values.
+- **Nil-safe.** All functions handle nil inputs without panicking.
 
-[Add project-specific security considerations here. Examples:]
+### Input validation
 
-- **Input Validation**: Always validate external inputs
-- **Authentication**: Implement proper authentication mechanisms
-- **Authorization**: Ensure proper access controls
-- **Data Protection**: Handle sensitive data appropriately
-- **Rate Limiting**: Implement rate limiting for public APIs
-- **Error Handling**: Avoid exposing sensitive information in error messages
+`to` accepts arbitrary `any` values as input. Well-formed Go values are handled safely, including numeric types, strings, booleans, and `nil`. Malformed values (e.g., interfaces over channels or functions for numeric conversion targets) return a `ConversionError` rather than panicking.
 
-### Best Practices
+### Known limitations
 
-1. **[PRACTICE_1]**: [Description of security practice]
-2. **[PRACTICE_2]**: [Description of security practice]
-3. **[PRACTICE_3]**: [Description of security practice]
-4. **Input Validation**: Always validate inputs from external sources
-5. **Error Handling**: Properly handle all error returns from library functions
-
-### Known Limitations
-
-[List any known security limitations of your project]
-
-- **[LIMITATION_1]**: [Description]
-- **[LIMITATION_2]**: [Description]
+- `to.Int` and `to.IntOr` parse strings via `strconv.Atoi`, which follows Go's standard parsing rules. Extreme values (exceeding int range) return a conversion error on the `Type[T]` path or the zero/fallback value on the outcome-named paths.
+- `to.Str(v)` uses `fmt.Sprintf("%v", v)` for non-string inputs. This can produce unexpected output for types with custom `String()` methods that panic — such panics would propagate out of `to`. Since stdlib `fmt` itself handles this case, `to` does not add protection beyond what `fmt` provides.
 
 ## Security Updates
 
-Security updates will be:
-
-- Released as patch versions (e.g., 1.0.1)
-- Documented in the CHANGELOG.md
-- Announced through GitHub releases
-- Tagged with security labels
+Security updates will be released as patch versions (e.g., 0.1.1), documented in CHANGELOG.md, and announced through GitHub releases.
 
 ## Acknowledgments
 
 We appreciate responsible disclosure and will acknowledge security researchers who help improve the security of this project.
-
-Thank you for helping keep our project and users safe!

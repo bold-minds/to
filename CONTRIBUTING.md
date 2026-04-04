@@ -1,201 +1,117 @@
-# Contributing to [PROJECT_NAME]
+# Contributing to `to`
 
-We love your input! We want to make contributing to this project as easy and transparent as possible, whether it's:
+Thanks for your interest in contributing. This guide covers the operational process. For the **why** — the design principles every contribution is tested against — see **[bold-minds/oss/PRINCIPLES.md](https://github.com/bold-minds/oss/blob/main/PRINCIPLES.md)**.
 
-- Reporting a bug
-- Discussing the current state of the code
-- Submitting a fix
-- Proposing new features
-- Becoming a maintainer
+## 🎯 Before You Start
 
-## 🚀 Development Process
+Every contribution is measured against the four Bold Minds principles: **outcome naming**, **one way to do each thing**, **get out of the way**, and **non-goals explicit**. If your proposed change doesn't honor these, it will not be merged.
 
-We use GitHub to host code, to track issues and feature requests, as well as accept pull requests.
+**Read [PRINCIPLES.md](https://github.com/bold-minds/oss/blob/main/PRINCIPLES.md) first.** It's the load-bearing document.
 
-### Pull Requests
+## 🔧 Development Setup
 
-1. Fork the repo and create your branch from `main`.
-2. If you've added code that should be tested, add tests.
-3. If you've changed APIs, update the documentation.
-4. Ensure the test suite passes.
-5. Make sure your code lints.
-6. Issue that pull request!
+**Requirements:** Go 1.26 or later, Git, Bash.
+
+```bash
+git clone https://github.com/bold-minds/to.git
+cd to
+go test ./...              # unit tests
+go test -race ./...        # race detection
+go test -bench=. ./...     # benchmarks
+./scripts/validate.sh      # full validation pipeline (local mode)
+./scripts/validate.sh ci   # strict CI mode
+```
+
+Your contribution must pass `./scripts/validate.sh ci` before submitting.
+
+## 📁 Project Structure
+
+```
+to/
+├── to.go                  # Implementation (single file)
+├── to_test.go             # Unit tests
+├── bench_test.go          # Benchmarks
+├── examples/              # Runnable examples
+├── scripts/
+│   └── validate.sh        # Validation pipeline
+├── README.md
+├── CONTRIBUTING.md        # This file
+├── CHANGELOG.md
+├── CODE_OF_CONDUCT.md
+├── SECURITY.md
+├── LICENSE
+└── go.mod
+```
+
+Keep it flat. No `internal/` directory.
+
+## 🎨 Code Style
+
+### Naming
+- Outcome naming per PRINCIPLES.md. For conversions, the function name IS the target type (`Int`, `Str`, `Bool`, `F64`).
+
+### Error Handling
+- Outcome-named functions (`Int`, `Str`, `Bool`, `F64`) **must not return errors**. They return the zero value on failure. Use `Or` variants for fallbacks or `Type[T]` for full error context.
+- `Type[T]` returns `(T, error)` where the error is always a `*ConversionError` with populated From/To/Value/Reason fields.
+- Never panic. All inputs (including nil) are handled gracefully.
+
+### Documentation
+- Every exported function has a doc comment.
+- Every numeric conversion function documents which input types it supports.
+- Package-level doc comment in `to.go`.
+
+### Dependencies
+- **Zero external dependencies.** `to` is pure stdlib.
 
 ## 🧪 Testing
 
-We maintain high test coverage and all contributions should include appropriate tests.
+**Coverage target: 100% of exported functions.** Conversion functions must cover every branch of their numeric type switches.
 
 ```bash
-# Run all tests
 go test -v ./...
-
-# Run tests with race detection
 go test -race ./...
-
-# Run benchmarks
-go test -bench=. ./...
-
-# Check test coverage
 go test -cover ./...
+go test -bench=. -benchmem ./...
 ```
 
-## 📝 Code Style
+## 📝 Pull Request Process
 
-We follow standard Go conventions:
+### PR Checklist
 
-- Use `gofmt` to format your code
-- Use `golint` and `go vet` to catch common issues
-- Follow effective Go guidelines
-- Write clear, self-documenting code
-- Add comments for exported functions and types
+- [ ] **Outcome naming** — does the function name describe what the caller gets?
+- [ ] **One way** — does any existing function already do this?
+- [ ] **Get out of the way** — can a Go dev use this from the signature alone?
+- [ ] **Non-goals** — does this violate any of the library's stated non-goals?
+- [ ] Tests cover 100% of new code
+- [ ] Benchmarks added for new exported functions
+- [ ] README updated
+- [ ] CHANGELOG.md updated
+- [ ] `./scripts/validate.sh ci` passes locally
 
-### Code Organization
+### PR Scope
+- One function per PR when adding new functionality
+- Bug fixes can be grouped if they share a root cause
 
-- Keep functions focused and small
-- Use meaningful variable and function names
-- Group related functionality together
-- Maintain consistent error handling patterns
+## 🆕 Adding a New Function
 
-## 🐛 Bug Reports
+`to` is deliberately small. New additions must clear a high bar:
 
-We use GitHub issues to track public bugs. Report a bug by [opening a new issue](https://github.com/bold-minds/[REPO_NAME]/issues/new).
+1. Read the library's non-goals in [README.md](README.md) and [PRINCIPLES.md](https://github.com/bold-minds/oss/blob/main/PRINCIPLES.md).
+2. Prove the stdlib gap. Go 1.26's `strconv` and `new(v)` cover more than you might think.
+3. Show real-world evidence from a codebase.
+4. For new target types, first ask: can `Type[T]` already handle this?
 
-**Great Bug Reports** tend to have:
+## 🏷️ Versioning and Releases
 
-- A quick summary and/or background
-- Steps to reproduce
-  - Be specific!
-  - Give sample code if you can
-- What you expected would happen
-- What actually happens
-- Notes (possibly including why you think this might be happening, or stuff you tried that didn't work)
+- Semantic versioning
+- v0.x: API may change between minor versions
+- v1.0+: breaking changes require major version bump
+- Every release updates CHANGELOG.md
 
-### Bug Report Template
+## 🙏 Code of Conduct
 
-```markdown
-**Describe the bug**
-A clear and concise description of what the bug is.
+See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+## 📄 License
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
-
-**Code Sample**
-```go
-// Minimal code sample that reproduces the issue
-```
-
-**Environment:**
-- Go version: [e.g. 1.21]
-- OS: [e.g. macOS, Linux, Windows]
-- Library version: [e.g. v1.0.0]
-
-**Additional context**
-Add any other context about the problem here.
-```
-
-## 💡 Feature Requests
-
-We welcome feature requests! Please provide:
-
-- **Use case**: Describe the problem you're trying to solve
-- **Proposed solution**: How you envision the feature working
-- **Alternatives considered**: Other approaches you've thought about
-- **Additional context**: Any other relevant information
-
-## 🏗️ Development Setup
-
-1. **Prerequisites**
-   ```bash
-   # Go 1.21 or later
-   go version
-   ```
-
-2. **Clone and setup**
-   ```bash
-   git clone https://github.com/bold-minds/id.git
-   cd id
-   go mod download
-   ```
-
-3. **Run tests**
-   ```bash
-   go test -v ./...
-   ```
-
-4. **Run benchmarks**
-   ```bash
-   go test -bench=. ./...
-   ```
-
-## 📋 Commit Guidelines
-
-We follow conventional commits for clear history:
-
-- `feat:` new feature
-- `fix:` bug fix
-- `docs:` documentation changes
-- `test:` adding or updating tests
-- `refactor:` code refactoring
-- `perf:` performance improvements
-- `chore:` maintenance tasks
-
-### Examples
-
-```
-feat: add batch generation with custom time ranges
-fix: resolve race condition in entropy generation
-docs: update README with new API examples
-test: add comprehensive validation tests
-perf: optimize string conversion allocations
-```
-
-## 🔄 Release Process
-
-Releases follow semantic versioning (SemVer):
-
-- **MAJOR**: incompatible API changes
-- **MINOR**: backwards-compatible functionality additions
-- **PATCH**: backwards-compatible bug fixes
-
-## 🤝 Code of Conduct
-
-### Our Pledge
-
-We pledge to make participation in our project a harassment-free experience for everyone, regardless of age, body size, disability, ethnicity, gender identity and expression, level of experience, nationality, personal appearance, race, religion, or sexual identity and orientation.
-
-### Our Standards
-
-**Positive behavior includes:**
-- Using welcoming and inclusive language
-- Being respectful of differing viewpoints and experiences
-- Gracefully accepting constructive criticism
-- Focusing on what is best for the community
-- Showing empathy towards other community members
-
-**Unacceptable behavior includes:**
-- Trolling, insulting/derogatory comments, and personal attacks
-- Public or private harassment
-- Publishing others' private information without explicit permission
-- Other conduct which could reasonably be considered inappropriate
-
-## 📞 Getting Help
-
-- **Documentation**: Check the README and code comments
-- **Issues**: Search existing issues before creating new ones
-- **Discussions**: Use GitHub Discussions for questions and ideas
-
-## 🏆 Recognition
-
-Contributors will be recognized in:
-- The project's README
-- Release notes for significant contributions
-- Special thanks in documentation
-
-Thank you for contributing! 🎉
+By contributing, you agree your contributions are licensed under the MIT License.
