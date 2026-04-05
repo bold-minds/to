@@ -8,7 +8,8 @@
 // Every function is nil-safe and never panics. Float-to-integer conversions
 // reject NaN, ±Inf, and out-of-range values rather than producing trap
 // values. Float-to-float narrowing rejects values that would overflow to
-// ±Inf.
+// ±Inf. NaN is preserved on float-to-float conversions (narrowing NaN is
+// lossless); it is only rejected on float-to-integer conversions.
 //
 // # Fallback semantics
 //
@@ -121,7 +122,10 @@ func Str(v any) string {
 // Int converts v to an int. Returns 0 on failure.
 // Supports all numeric types, bool (true→1, false→0), and numeric strings.
 // Float-to-int conversion truncates toward zero; NaN, ±Inf, and values
-// outside the int range produce 0 (via a silenced error).
+// outside the int range produce 0 (via a silenced error). uint64 values
+// greater than math.MaxInt64 are rejected as out-of-range; use
+// Type[uint64] (or a named uint64 target) if you need the full unsigned
+// range.
 func Int(v any) int {
 	result, _ := Type[int](v)
 	return result
@@ -189,9 +193,11 @@ func F64Or(v any, fallback float64) float64 {
 // outcome-named shortcuts are shorter.
 //
 // Named numeric types (e.g., time.Duration, type Port int64) are supported
-// via reflection and range-checked against their underlying kind.
-// time.Duration additionally accepts Go duration strings like "5s" or
-// "1h30m" via time.ParseDuration.
+// via reflection and range-checked against their underlying kind. Named
+// string and named boolean types (e.g., type Name string, type Flag bool)
+// are also supported: strings go through Str, booleans through the same
+// parser used by Type[bool]. time.Duration additionally accepts Go
+// duration strings like "5s" or "1h30m" via time.ParseDuration.
 //
 // When T is an interface type (including any), the fast path returns v
 // unchanged if v already satisfies T. If v is nil and T is any, the zero
@@ -283,7 +289,12 @@ func Type[T any](v any) (T, error) {
 		return r, nil
 	}
 
-	// Fallback: named numeric types (time.Duration, type Port int64, …).
+	// Fallback: named numeric/string/bool types (time.Duration, type Port
+	// int64, type Name string, …). convertNamed returns a three-valued
+	// result: ok=true means "I handled this target kind" — err may still
+	// be non-nil if the value couldn't be converted. ok=false means "this
+	// target kind is not numeric/string/bool" and err is guaranteed nil,
+	// so we fall through to the generic "unsupported conversion" error.
 	if result, ok, err := convertNamed[T](v); ok {
 		return result, err
 	}
@@ -313,9 +324,6 @@ func TypeOr[T any](v any, fallback T) T {
 //
 //	x := v
 //	p := &x
-//
-// Equivalent to Go 1.26+'s new(v) builtin, but works on all supported
-// Go versions of this package.
 func Ptr[T any](v T) *T {
 	return &v
 }
@@ -362,12 +370,22 @@ func convertNamed[T any](v any) (T, bool, error) {
 	// Special case: time.Duration can parse Go duration strings like "5s".
 	if rt == reflect.TypeOf(time.Duration(0)) {
 		if s, isString := v.(string); isString {
-			if d, perr := time.ParseDuration(s); perr == nil {
+			d, perr := time.ParseDuration(s)
+			if perr == nil {
 				if r, assigned := any(d).(T); assigned {
 					return r, true, nil
 				}
+			} else if _, numErr := strconv.ParseInt(s, 10, 64); numErr != nil {
+				// Neither a valid duration nor a pure integer string.
+				// Surface the duration-parse error, which is almost
+				// always what the user intended (e.g., "5 seconds").
+				return zero, true, &ConversionError{
+					From: "string", To: targetName, Value: v,
+					Reason: "invalid duration string", Cause: perr,
+				}
 			}
-			// fall through: allow pure numeric duration strings via toInt64
+			// Pure numeric string: fall through to the integer reflect
+			// path below, which parses it via toInt64.
 		}
 	}
 
@@ -396,10 +414,24 @@ func convertNamed[T any](v any) (T, bool, error) {
 		if err != nil {
 			return zero, true, err
 		}
+		// OverflowFloat returns false for NaN, which is the behavior we
+		// want: NaN narrows losslessly between float32 and float64.
 		if rv.OverflowFloat(n) {
 			return zero, true, numericOverflowError(fromName, targetName, v)
 		}
 		rv.SetFloat(n)
+	case reflect.String:
+		// Named string types (type Name string). Str is total on non-nil
+		// input — v is guaranteed non-nil here because Type[T] checks for
+		// nil before calling convertNamed.
+		rv.SetString(Str(v))
+	case reflect.Bool:
+		// Named boolean types (type Flag bool).
+		b, err := toBool(v, targetName)
+		if err != nil {
+			return zero, true, err
+		}
+		rv.SetBool(b)
 	default:
 		return zero, false, nil
 	}
@@ -441,7 +473,7 @@ func toInt64(v any, target string) (int64, error) {
 	case uint:
 		if uint64(x) > math.MaxInt64 {
 			return 0, &ConversionError{
-				From: "uint", To: target, Value: v,
+				From: fmt.Sprintf("%T", v), To: target, Value: v,
 				Reason: "value exceeds int64 range",
 			}
 		}
@@ -455,7 +487,7 @@ func toInt64(v any, target string) (int64, error) {
 	case uint64:
 		if x > math.MaxInt64 {
 			return 0, &ConversionError{
-				From: "uint64", To: target, Value: v,
+				From: fmt.Sprintf("%T", v), To: target, Value: v,
 				Reason: "value exceeds int64 range",
 			}
 		}

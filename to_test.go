@@ -666,7 +666,27 @@ func TestType_Duration_FromInt64(t *testing.T) {
 }
 
 func TestType_Duration_BadString(t *testing.T) {
-	_, err := to.Type[time.Duration]("not a duration")
+	// A non-numeric, non-duration string should surface the duration-parse
+	// error, not a generic "invalid numeric string" error. Pinning the
+	// wording protects against silent regressions if the fallback logic
+	// in convertNamed changes.
+	_, err := to.Type[time.Duration]("5 seconds")
+	if err == nil {
+		t.Fatal("expected error for bad duration string")
+	}
+	var ce *to.ConversionError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *ConversionError, got %T", err)
+	}
+	if ce.Reason != "invalid duration string" {
+		t.Errorf("Reason = %q, want %q", ce.Reason, "invalid duration string")
+	}
+	if ce.Cause == nil {
+		t.Error("expected Cause to carry the underlying time.ParseDuration error")
+	}
+
+	// Completely non-numeric, non-duration string — same path.
+	_, err = to.Type[time.Duration]("not a duration")
 	if err == nil {
 		t.Fatal("expected error for bad duration string")
 	}
@@ -857,6 +877,108 @@ func TestType_NamedFloat_BadSource(t *testing.T) {
 	_, err := to.Type[NamedFloat]([]int{1})
 	if err == nil {
 		t.Fatal("expected error for slice source")
+	}
+}
+
+// NaN is preserved by float-to-float conversions (narrowing NaN is lossless).
+// This is an intentional invariant — pinned here so future refactors don't
+// silently change the behavior.
+func TestType_Float32_NaN(t *testing.T) {
+	got, err := to.Type[float32](math.NaN())
+	if err != nil {
+		t.Fatalf("Type[float32](NaN) returned unexpected error: %v", err)
+	}
+	if !math.IsNaN(float64(got)) {
+		t.Errorf("Type[float32](NaN) = %v, want NaN", got)
+	}
+}
+
+func TestType_NamedFloat_NaN(t *testing.T) {
+	// NamedFloat has underlying kind float32 and goes through convertNamed.
+	got, err := to.Type[NamedFloat](math.NaN())
+	if err != nil {
+		t.Fatalf("Type[NamedFloat](NaN) returned unexpected error: %v", err)
+	}
+	if !math.IsNaN(float64(got)) {
+		t.Errorf("Type[NamedFloat](NaN) = %v, want NaN", got)
+	}
+}
+
+// Float-to-int NaN rejection is the opposite invariant: NaN MUST produce
+// an error when the target is an integer kind, named or otherwise.
+func TestType_NamedInt_NaN_Rejected(t *testing.T) {
+	_, err := to.Type[NamedInt](math.NaN())
+	if err == nil {
+		t.Fatal("expected NaN→named int to error")
+	}
+}
+
+// NamedString and NamedBool exercise the reflect.String and reflect.Bool
+// branches of convertNamed.
+type NamedString string
+type NamedBool bool
+
+func TestType_NamedString(t *testing.T) {
+	// From a matching underlying kind (string literal).
+	got, err := to.Type[NamedString]("hello")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "hello" {
+		t.Errorf("got %q, want %q", got, "hello")
+	}
+
+	// From a numeric source — Str formats it.
+	got, err = to.Type[NamedString](42)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "42" {
+		t.Errorf("got %q, want %q", got, "42")
+	}
+
+	// From a bool.
+	got, err = to.Type[NamedString](true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "true" {
+		t.Errorf("got %q, want %q", got, "true")
+	}
+}
+
+func TestType_NamedBool(t *testing.T) {
+	// From a bool literal.
+	got, err := to.Type[NamedBool](true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != true {
+		t.Errorf("got %v, want true", got)
+	}
+
+	// From a recognized string form.
+	got, err = to.Type[NamedBool]("yes")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != true {
+		t.Errorf("got %v, want true", got)
+	}
+
+	// From an int (non-zero → true).
+	got, err = to.Type[NamedBool](int(5))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != true {
+		t.Errorf("got %v, want true", got)
+	}
+
+	// Unrecognized string should error.
+	_, err = to.Type[NamedBool]("maybe")
+	if err == nil {
+		t.Fatal("expected error for unrecognized bool string")
 	}
 }
 
@@ -1343,11 +1465,11 @@ func FuzzType_NoPanic(f *testing.F) {
 				uint64(data[2])<<40 | uint64(data[3])<<32 |
 				uint64(data[4])<<24 | uint64(data[5])<<16 |
 				uint64(data[6])<<8 | uint64(data[7])
-			f := math.Float64frombits(bits)
-			_, _ = to.Type[int](f)
-			_, _ = to.Type[int64](f)
-			_, _ = to.Type[uint64](f)
-			_, _ = to.Type[float32](f)
+			flt := math.Float64frombits(bits)
+			_, _ = to.Type[int](flt)
+			_, _ = to.Type[int64](flt)
+			_, _ = to.Type[uint64](flt)
+			_, _ = to.Type[float32](flt)
 		}
 	})
 }

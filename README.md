@@ -107,6 +107,15 @@ b := to.BoolOr(x, false)
 f := to.F64Or(x, 0.0)
 ```
 
+> ⚠️ **`StrOr` is nil-only.** `IntOr`, `BoolOr`, and `F64Or` fall back whenever conversion fails (including empty strings). `StrOr` is the exception: it returns the fallback **only when `v` is nil**, because `Str` never fails on non-nil input. If you reach for `to.StrOr(cfg["name"], "anonymous")` expecting an empty string to trigger `"anonymous"`, it won't — use an explicit check:
+>
+> ```go
+> name := to.Str(cfg["name"])
+> if name == "" {
+>     name = "anonymous"
+> }
+> ```
+
 ### Generic conversion
 
 For target types not covered by the outcome-named shortcuts — `int64`, `float32`, `time.Duration`, user-defined named numeric types, etc. — reach for `Type[T]`:
