@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-04-05
+
 ### Added
 - `PtrOr[T any](v T, fallback *T) *T` — value-to-pointer counterpart of `ValOr`. Returns a pointer to v when v is not the zero value of T, and returns fallback otherwise. Zero-value detection uses `reflect.Value.IsZero`, which is defined for every Go type (primitives, structs, arrays, nil pointers/maps/slices/channels/funcs/interfaces). The primary use case is building JSON patch/update payloads where unset fields must be omitted via `omitempty`. Completes the symmetry with the existing `Val`/`ValOr` pair: `Ptr`/`PtrOr` handles the T → *T direction with a caller-supplied fallback for the zero case.
 - `Ptr[T any](v T) *T` — ergonomic pointer creation. Returns a non-nil pointer to a fresh copy of v. Equivalent to Go 1.26+'s `new(v)` builtin, but available on all supported Go versions of this package.
