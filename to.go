@@ -328,6 +328,38 @@ func Ptr[T any](v T) *T {
 	return &v
 }
 
+// PtrOr returns a pointer to a fresh copy of v when v is not the zero
+// value of T, and returns fallback otherwise. It is the value-to-pointer
+// counterpart of ValOr.
+//
+// Zero-value detection uses reflect.Value.IsZero, which is defined for
+// every Go type: primitives (empty string, 0, false), arrays (all
+// elements zero), structs (all fields zero), nil pointers, nil maps,
+// nil slices, nil channels, nil funcs, and nil interfaces. This means
+// PtrOr treats a non-nil empty slice ([]int{}) and a non-nil empty map
+// (map[string]int{}) as present, not zero — they are not the zero
+// value of their types (which is nil). Callers who want Ruby-style
+// "blank" semantics for empty collections should filter before
+// calling PtrOr.
+//
+// The common case is building JSON patch/update payloads where unset
+// fields must be omitted, not serialized as zero values:
+//
+//	type UserPatch struct {
+//	    Name *string `json:"name,omitempty"`
+//	    Age  *int    `json:"age,omitempty"`
+//	}
+//	u := UserPatch{
+//	    Name: to.PtrOr(formName, nil), // nil pointer when form field is blank
+//	    Age:  to.PtrOr(formAge, nil),  // nil pointer when age is 0
+//	}
+func PtrOr[T any](v T, fallback *T) *T {
+	if reflect.ValueOf(&v).Elem().IsZero() {
+		return fallback
+	}
+	return &v
+}
+
 // Val returns the value pointed to by p, or the zero value of T if p is nil.
 // Val returns a copy; for large struct types, prefer reading fields directly
 // to avoid the copy cost.

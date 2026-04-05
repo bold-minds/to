@@ -378,6 +378,108 @@ func TestValOr(t *testing.T) {
 	}
 }
 
+func TestPtrOr_PresentValues(t *testing.T) {
+	// Non-zero primitives return a pointer to the value, not the fallback.
+	if got := to.PtrOr("hello", nil); got == nil || *got != "hello" {
+		t.Errorf("PtrOr(\"hello\", nil) = %v, want pointer to \"hello\"", got)
+	}
+	if got := to.PtrOr(42, nil); got == nil || *got != 42 {
+		t.Errorf("PtrOr(42, nil) = %v, want pointer to 42", got)
+	}
+	if got := to.PtrOr(3.14, nil); got == nil || *got != 3.14 {
+		t.Errorf("PtrOr(3.14, nil) = %v, want pointer to 3.14", got)
+	}
+	if got := to.PtrOr(true, nil); got == nil || *got != true {
+		t.Errorf("PtrOr(true, nil) = %v, want pointer to true", got)
+	}
+}
+
+func TestPtrOr_ZeroValuesReturnFallback(t *testing.T) {
+	// Zero-value primitives return the caller's fallback.
+	if got := to.PtrOr("", nil); got != nil {
+		t.Errorf("PtrOr(\"\", nil) = %v, want nil", got)
+	}
+	if got := to.PtrOr(0, nil); got != nil {
+		t.Errorf("PtrOr(0, nil) = %v, want nil", got)
+	}
+	if got := to.PtrOr(0.0, nil); got != nil {
+		t.Errorf("PtrOr(0.0, nil) = %v, want nil", got)
+	}
+	if got := to.PtrOr(false, nil); got != nil {
+		t.Errorf("PtrOr(false, nil) = %v, want nil", got)
+	}
+}
+
+func TestPtrOr_NonNilFallback(t *testing.T) {
+	// Fallback pointer is respected when v is zero.
+	dflt := "anonymous"
+	if got := to.PtrOr("", &dflt); got != &dflt {
+		t.Errorf("PtrOr(\"\", &dflt) = %v, want &dflt", got)
+	}
+	if got := to.PtrOr("Alice", &dflt); got == nil || *got != "Alice" {
+		t.Errorf("PtrOr(\"Alice\", &dflt) = %v, want pointer to \"Alice\"", got)
+	}
+}
+
+func TestPtrOr_Structs(t *testing.T) {
+	type Point struct{ X, Y int }
+	// Zero struct returns fallback.
+	if got := to.PtrOr(Point{}, nil); got != nil {
+		t.Errorf("PtrOr(Point{}, nil) = %v, want nil", got)
+	}
+	// Non-zero struct returns pointer.
+	p := Point{X: 1, Y: 2}
+	if got := to.PtrOr(p, nil); got == nil || *got != p {
+		t.Errorf("PtrOr(%v, nil) = %v, want pointer to %v", p, got, p)
+	}
+}
+
+func TestPtrOr_NilCollections(t *testing.T) {
+	// Nil slice is the zero value of []T — returns fallback.
+	var nilSlice []int
+	if got := to.PtrOr(nilSlice, nil); got != nil {
+		t.Errorf("PtrOr(nil []int, nil) = %v, want nil", got)
+	}
+	// Nil map is the zero value of map[K]V — returns fallback.
+	var nilMap map[string]int
+	if got := to.PtrOr(nilMap, nil); got != nil {
+		t.Errorf("PtrOr(nil map, nil) = %v, want nil", got)
+	}
+}
+
+func TestPtrOr_NonNilEmptyCollections(t *testing.T) {
+	// Non-nil empty slice/map are present, not zero. They are NOT the
+	// zero value of their type (nil is). PtrOr documents this explicitly;
+	// callers wanting "blank" semantics must filter before the call.
+	emptySlice := []int{}
+	if got := to.PtrOr(emptySlice, nil); got == nil {
+		t.Errorf("PtrOr([]int{}, nil) = nil, want non-nil pointer (empty slice is not zero)")
+	}
+	emptyMap := map[string]int{}
+	if got := to.PtrOr(emptyMap, nil); got == nil {
+		t.Errorf("PtrOr(map[string]int{}, nil) = nil, want non-nil pointer (empty map is not zero)")
+	}
+}
+
+func TestPtrOr_JSONOmitemptyExample(t *testing.T) {
+	// The documented primary use case: JSON patch payloads where unset
+	// form fields must be omitted, not serialized as zero values.
+	type UserPatch struct {
+		Name *string
+		Age  *int
+	}
+	got := UserPatch{
+		Name: to.PtrOr("Alice", nil),
+		Age:  to.PtrOr(0, nil),
+	}
+	if got.Name == nil || *got.Name != "Alice" {
+		t.Errorf("Name = %v, want pointer to \"Alice\"", got.Name)
+	}
+	if got.Age != nil {
+		t.Errorf("Age = %v, want nil (age was zero)", got.Age)
+	}
+}
+
 // =============================================================================
 // Numeric type coverage — exercises every branch in convertToInt/Int64/Float64/Bool
 // =============================================================================
