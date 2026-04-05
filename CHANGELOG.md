@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `Ptr[T any](v T) *T` — ergonomic pointer creation. Returns a non-nil pointer to a fresh copy of v. Equivalent to Go 1.26+'s `new(v)` builtin, but available on all supported Go versions of this package.
+
+### Changed
+- Lowered Go floor from 1.26 to 1.21 (`go.mod`, README, CHANGELOG, workflow matrix, validate.sh).
+- README `Pointer creation` section rewritten to document `to.Ptr` instead of directing users to Go 1.26's `new(v)`.
+- CI workflow split into `test` matrix (read-only permissions) and `badges` job (write, main-only) for least-privilege.
+- `golangci-lint` pinned to `v2.0.2` instead of `@latest` in CI and validate.sh.
+- `validate.sh`: portable `grep -oE | sed` instead of GNU-only `grep -oP`; SC2155 fix; numeric sanitization on alert-count API responses.
+- `.golangci.yml`: dropped dead settings blocks for linters not in enable list.
+- `codeql.yml`: enabled push/PR/weekly schedule triggers.
+
 ## [0.1.0] — Initial release
 
 ### Added
@@ -33,9 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Zero external dependencies — pure stdlib
 
 ### Deliberate non-goals
-- **No `Ptr(v)` function** — Go 1.26's `new(v)` builtin replaces it at the language level
 - **No per-type variants** for every numeric width (no `Int32`, `Int8`, `Uint`, etc.) — use `Type[T]` for uncommon targets
 - **No `Must*` panicking variants** — use the outcome-named functions or `Or` fallback variants
 
 ### Requires
-- Go 1.26 or later
+- Go 1.21 or later
+
+*(Note: the `Ptr(v)` function was added in the Unreleased section after the initial 0.1.0 draft, when the family's minimum Go version was lowered from 1.26 to 1.21. On Go 1.26+, the `new(v)` builtin is equivalent.)*

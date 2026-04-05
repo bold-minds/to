@@ -2,6 +2,7 @@ package to_test
 
 import (
 	"errors"
+	"io"
 	"math"
 	"testing"
 	"time"
@@ -289,8 +290,67 @@ func TestConversionError_MessageWithCause(t *testing.T) {
 }
 
 // =============================================================================
-// Val / ValOr
+// Ptr / Val / ValOr
 // =============================================================================
+
+func TestPtr(t *testing.T) {
+	// Ptr returns a non-nil pointer to a fresh copy of v.
+	p := to.Ptr(42)
+	if p == nil {
+		t.Fatal("Ptr returned nil")
+	}
+	if *p != 42 {
+		t.Errorf("got *p = %d, want 42", *p)
+	}
+
+	// Each call returns a distinct pointer (not aliased).
+	p1 := to.Ptr("alice")
+	p2 := to.Ptr("alice")
+	if p1 == p2 {
+		t.Error("Ptr returned the same pointer for two distinct calls")
+	}
+
+	// Mutating *p must not affect the source variable (fresh copy semantics).
+	v := 10
+	q := to.Ptr(v)
+	*q = 999
+	if v != 10 {
+		t.Errorf("mutating *Ptr changed the source: v = %d, want 10", v)
+	}
+}
+
+func TestPtr_Structs(t *testing.T) {
+	type User struct {
+		ID   int
+		Name string
+	}
+	u := to.Ptr(User{ID: 1, Name: "alice"})
+	if u.ID != 1 || u.Name != "alice" {
+		t.Errorf("got %+v, want {1 alice}", u)
+	}
+}
+
+func TestPtr_ZeroValues(t *testing.T) {
+	// Ptr of zero values still returns a valid pointer (unlike the
+	// "nil for empty values" footgun from an earlier goby version).
+	if p := to.Ptr(""); p == nil || *p != "" {
+		t.Errorf("Ptr(\"\") should return a non-nil pointer to empty string")
+	}
+	if p := to.Ptr(0); p == nil || *p != 0 {
+		t.Errorf("Ptr(0) should return a non-nil pointer to 0")
+	}
+	if p := to.Ptr(false); p == nil || *p != false {
+		t.Errorf("Ptr(false) should return a non-nil pointer to false")
+	}
+}
+
+func TestPtr_RoundTripWithVal(t *testing.T) {
+	// Ptr and Val should be inverses
+	original := 42
+	if to.Val(to.Ptr(original)) != original {
+		t.Errorf("Val(Ptr(%d)) != %d", original, original)
+	}
+}
 
 func TestVal(t *testing.T) {
 	s := "hello"
@@ -689,12 +749,12 @@ func TestBool_MixedCaseString(t *testing.T) {
 	// With the switch to strconv.ParseBool + strings.EqualFold, unusual
 	// casings like tRuE and yEs should be accepted.
 	cases := map[string]bool{
-		"tRuE": true,
+		"tRuE":  true,
 		"FaLsE": false,
-		"yEs":  true,
-		"nO":   false,
-		"oN":   true,
-		"oFf":  false,
+		"yEs":   true,
+		"nO":    false,
+		"oN":    true,
+		"oFf":   false,
 	}
 	for in, want := range cases {
 		t.Run(in, func(t *testing.T) {
@@ -881,7 +941,7 @@ func TestType_Bool_AllNumericSources(t *testing.T) {
 
 func TestType_Bool_AllStringForms(t *testing.T) {
 	trueForms := []string{"true", "1", "yes", "on", "TRUE", "True", "YES", "Yes", "ON", "On"}
-	falseForms := []string{"false", "0", "no", "off", "FALSE", "False", "NO", "No", "OFF", "Off", ""}
+	falseForms := []string{"false", "0", "no", "off", "FALSE", "False", "NO", "No", "OFF", "Off"}
 
 	for _, s := range trueForms {
 		t.Run("true:"+s, func(t *testing.T) {
@@ -898,6 +958,28 @@ func TestType_Bool_AllStringForms(t *testing.T) {
 				t.Errorf("Type[bool](%q) = (%v, %v), want (false, nil)", s, got, err)
 			}
 		})
+	}
+}
+
+func TestType_Bool_EmptyStringIsError(t *testing.T) {
+	// The empty string is explicitly rejected so that BoolOr's fallback
+	// fires for unset env vars — the inverse of strconv.ParseBool's stance
+	// on "" but aligned with the package's env-var parsing use case.
+	_, err := to.Type[bool]("")
+	if err == nil {
+		t.Fatal("expected error for empty string")
+	}
+	var cerr *to.ConversionError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("expected *ConversionError, got %T", err)
+	}
+	// And BoolOr must return the fallback for "".
+	if got := to.BoolOr("", true); !got {
+		t.Errorf("BoolOr(\"\", true) = false, want true (fallback should fire for empty string)")
+	}
+	// to.Bool swallows the error and returns the zero value.
+	if got := to.Bool(""); got {
+		t.Errorf("Bool(\"\") = true, want false")
 	}
 }
 
@@ -1002,7 +1084,7 @@ func TestIntegration_EnvVarParsing(t *testing.T) {
 func TestIntegration_ConfigMap(t *testing.T) {
 	// Simulating a config parsed from JSON/YAML where values are any
 	cfg := map[string]any{
-		"timeout": 30.0,    // JSON numbers unmarshal as float64
+		"timeout": 30.0, // JSON numbers unmarshal as float64
 		"host":    "localhost",
 		"debug":   true,
 	}
@@ -1018,4 +1100,222 @@ func TestIntegration_ConfigMap(t *testing.T) {
 	if !debug {
 		t.Errorf("got %v, want true", debug)
 	}
+}
+
+// =============================================================================
+// Regression tests — boundaries that previously slipped past the safety net
+// =============================================================================
+
+// TestType_Int_MaxInt64FloatBoundary pins the fix for the floatToInt64
+// boundary bug: float64(math.MaxInt64) cannot be represented exactly and
+// rounds up to 2^63, which is out of int64 range. The previous `x >
+// math.MaxInt64` comparison promoted the constant to 2^63 and allowed the
+// exact value 2^63 to slip through to int64(x), producing INT64_MIN on
+// amd64 — the exact trap the package claims to prevent.
+func TestType_Int_MaxInt64FloatBoundary(t *testing.T) {
+	cases := []float64{
+		float64(math.MaxInt64), // Rounds to 2^63 — must be rejected.
+		math.Nextafter(float64(math.MaxInt64), math.Inf(1)),
+	}
+	for _, x := range cases {
+		t.Run("", func(t *testing.T) {
+			got, err := to.Type[int64](x)
+			if err == nil {
+				t.Fatalf("Type[int64](%v) = (%d, nil), want *ConversionError", x, got)
+			}
+			var cerr *to.ConversionError
+			if !errors.As(err, &cerr) {
+				t.Fatalf("expected *ConversionError, got %T", err)
+			}
+			// And the outcome-named shortcut must return 0, not INT64_MIN.
+			if got := to.Int(x); got != 0 {
+				t.Errorf("to.Int(%v) = %d, want 0", x, got)
+			}
+		})
+	}
+
+	// The symmetric lower-bound case: -2^63 IS exactly representable in
+	// float64, so it must round-trip successfully.
+	minFloat := float64(math.MinInt64)
+	if got, err := to.Type[int64](minFloat); err != nil || got != math.MinInt64 {
+		t.Errorf("Type[int64](MinInt64 as float) = (%d, %v), want (%d, nil)", got, err, int64(math.MinInt64))
+	}
+}
+
+// TestConversionError_UnwrapDirect exercises Unwrap explicitly (not just
+// indirectly via errors.Is) so the contract is pinned.
+func TestConversionError_UnwrapDirect(t *testing.T) {
+	cause := errors.New("underlying")
+	err := &to.ConversionError{
+		From: "string", To: "int", Value: "abc", Reason: "bad", Cause: cause,
+	}
+	if got := errors.Unwrap(err); got != cause {
+		t.Errorf("errors.Unwrap = %v, want %v", got, cause)
+	}
+
+	// And with no cause, Unwrap returns nil.
+	err2 := &to.ConversionError{From: "x", To: "y", Value: nil, Reason: "z"}
+	if got := errors.Unwrap(err2); got != nil {
+		t.Errorf("errors.Unwrap(no-cause) = %v, want nil", got)
+	}
+}
+
+// TestType_NonEmptyInterfaceTarget_Nil covers the nil-input path for a
+// non-empty interface target — previously uncovered. The promise in the
+// Type[T] godoc is that only any (the empty interface) accepts nil; every
+// other interface target must surface a ConversionError.
+func TestType_NonEmptyInterfaceTarget_Nil(t *testing.T) {
+	_, err := to.Type[io.Reader](nil)
+	if err == nil {
+		t.Fatal("expected error for Type[io.Reader](nil)")
+	}
+	var cerr *to.ConversionError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("expected *ConversionError, got %T", err)
+	}
+	if cerr.From != "nil" {
+		t.Errorf("From=%q, want nil", cerr.From)
+	}
+}
+
+// TestType_NamedUint64_AllSources exercises every branch of the toUint64
+// helper via a named uint64 target. Without this, the reflect-based uint
+// path only covers a fraction of toUint64's source-type switch.
+func TestType_NamedUint64_AllSources(t *testing.T) {
+	type Size uint64
+	cases := []struct {
+		name string
+		in   any
+		want uint64
+	}{
+		{"uint", uint(42), 42},
+		{"uint8", uint8(42), 42},
+		{"uint16", uint16(42), 42},
+		{"uint32", uint32(42), 42},
+		{"uint64", uint64(42), 42},
+		{"uintptr", uintptr(42), 42},
+		{"int", int(42), 42},
+		{"int8", int8(42), 42},
+		{"int16", int16(42), 42},
+		{"int32", int32(42), 42},
+		{"int64", int64(42), 42},
+		{"float32", float32(42), 42},
+		{"float64", float64(42), 42},
+		{"bool true", true, 1},
+		{"bool false", false, 0},
+		{"string", "42", 42},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := to.Type[Size](tt.in)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if uint64(got) != tt.want {
+				t.Errorf("got %d, want %d", uint64(got), tt.want)
+			}
+		})
+	}
+
+	// Error branches.
+	type Size32 uint32
+	errCases := []struct {
+		name string
+		in   any
+	}{
+		{"negative int", -1},
+		{"negative int8", int8(-1)},
+		{"negative int16", int16(-1)},
+		{"negative int32", int32(-1)},
+		{"negative int64", int64(-1)},
+		{"negative float", -1.5},
+		{"NaN", math.NaN()},
+		{"+Inf", math.Inf(1)},
+		{"-Inf", math.Inf(-1)},
+		{"overflow float", 1e20},
+		{"bad string", "abc"},
+		{"unsupported source", []int{1}},
+		{"overflow uint32 from uint64", uint64(1 << 40)},
+	}
+	for _, tt := range errCases {
+		t.Run("err:"+tt.name, func(t *testing.T) {
+			if _, err := to.Type[Size32](tt.in); err == nil {
+				t.Fatalf("expected error for %v", tt.in)
+			}
+		})
+	}
+}
+
+// TestType_NamedUint64_FullRange verifies the toUint64 path preserves
+// values above math.MaxInt64 for named uint64 targets. The previous
+// implementation routed through int64 and rejected values > MaxInt64 even
+// when the target could hold them.
+func TestType_NamedUint64_FullRange(t *testing.T) {
+	type Size uint64
+	const big = uint64(math.MaxUint64)
+	got, err := to.Type[Size](big)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if uint64(got) != big {
+		t.Errorf("got %d, want %d", uint64(got), big)
+	}
+
+	// Negative sources still rejected.
+	if _, negErr := to.Type[Size](-1); negErr == nil {
+		t.Fatal("expected error for negative → Size")
+	}
+
+	// Numeric string.
+	got, err = to.Type[Size]("18446744073709551615")
+	if err != nil || uint64(got) != big {
+		t.Errorf("string path: got (%d, %v), want (%d, nil)", uint64(got), err, big)
+	}
+}
+
+// =============================================================================
+// Fuzz target — Type[T] must never panic, for any input
+// =============================================================================
+
+// FuzzType_NoPanic is a cheap guardrail: Type[int]/Bool/F64 must never
+// panic regardless of input. Seed values cover the boundary cases
+// surfaced during review; the fuzzer explores from there.
+func FuzzType_NoPanic(f *testing.F) {
+	seeds := [][]byte{
+		[]byte(""),
+		[]byte("abc"),
+		[]byte("0"),
+		[]byte("true"),
+		[]byte("9223372036854775807"),
+		[]byte("18446744073709551615"),
+		[]byte("-9223372036854775808"),
+		[]byte("NaN"),
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		s := string(data)
+		// String inputs via all numeric paths.
+		_, _ = to.Type[int](s)
+		_, _ = to.Type[int64](s)
+		_, _ = to.Type[uint64](s)
+		_, _ = to.Type[float32](s)
+		_, _ = to.Type[float64](s)
+		_, _ = to.Type[bool](s)
+		_, _ = to.Type[time.Duration](s)
+
+		// Float inputs drawn from the bytes: reinterpret first 8 bytes.
+		if len(data) >= 8 {
+			bits := uint64(data[0])<<56 | uint64(data[1])<<48 |
+				uint64(data[2])<<40 | uint64(data[3])<<32 |
+				uint64(data[4])<<24 | uint64(data[5])<<16 |
+				uint64(data[6])<<8 | uint64(data[7])
+			f := math.Float64frombits(bits)
+			_, _ = to.Type[int](f)
+			_, _ = to.Type[int64](f)
+			_, _ = to.Type[uint64](f)
+			_, _ = to.Type[float32](f)
+		}
+	})
 }

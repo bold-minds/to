@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Reference](https://pkg.go.dev/badge/github.com/bold-minds/to.svg)](https://pkg.go.dev/github.com/bold-minds/to)
-[![Go Version](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/bold-minds/to/main/.github/badges/go-version.json)](https://golang.org/doc/go1.26)
+[![Go Version](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/bold-minds/to/main/.github/badges/go-version.json)](https://golang.org/doc/go1.21)
 [![Latest Release](https://img.shields.io/github/v/release/bold-minds/to?logo=github&color=blueviolet)](https://github.com/bold-minds/to/releases)
 [![Last Updated](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/bold-minds/to/main/.github/badges/last-updated.json)](https://github.com/bold-minds/to/commits)
 [![golangci-lint](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/bold-minds/to/main/.github/badges/golangci-lint.json)](https://github.com/bold-minds/to/actions/workflows/test.yaml)
@@ -33,7 +33,7 @@ port := to.IntOr(os.Getenv("PORT"), 8080)
 - 🧭 **Generic escape hatch** — `to.Type[T](x)` handles any target type when the outcome-named shortcuts don't cover it
 - 🧨 **Rich error context** — `ConversionError` tells you the source type, target type, value, and reason
 - 🛡️ **Nil-safe everywhere** — `nil` inputs convert predictably, no panics
-- 🪶 **Tiny** — 12 functions, one file, zero dependencies
+- 🪶 **Tiny** — 13 functions, one file, zero dependencies
 - 🔗 **Pairs with [`bold-minds/dig`](https://github.com/bold-minds/dig)** — dig into nested data, then convert the leaf
 
 ## 📦 Installation
@@ -42,7 +42,7 @@ port := to.IntOr(os.Getenv("PORT"), 8080)
 go get github.com/bold-minds/to
 ```
 
-Requires Go 1.26 or later.
+Requires Go 1.21 or later.
 
 ## 🚀 Quick Start
 
@@ -168,17 +168,31 @@ name := to.Val(namePtr)                 // zero value on nil
 name := to.ValOr(namePtr, "anonymous")  // custom default on nil
 ```
 
-### Pointer creation — use `new(v)` from Go 1.26
+### Pointer creation
 
-`to` does **not** provide a `Ptr(v)` function. Go 1.26 extended the `new` builtin to accept expressions, so `new(v)` returns a `*T` pointing at a fresh copy of `v` — no library needed:
+Go's strict nil-safety means creating a pointer to a literal or freshly computed value requires a temp variable:
 
 ```go
-p := new(8080)          // *int pointing at 8080
-s := new("hello")       // *string pointing at "hello"
-t := new(time.Now())    // *time.Time pointing at the current time
+// Without
+x := 8080
+p := &x
+
+// With
+p := to.Ptr(8080)
 ```
 
-This is the language-level replacement for `to.Ptr`, `lo.ToPtr`, `ptr.To`, and similar helpers. `to.Val` / `to.ValOr` exist because Go does not have a language-level safe dereferencing operation.
+`to.Ptr` returns a pointer to a fresh copy of its argument. It works for any type — primitives, strings, slices, maps, structs, and interfaces.
+
+```go
+port := to.Ptr(8080)          // *int
+name := to.Ptr("alice")       // *string
+now  := to.Ptr(time.Now())    // *time.Time
+user := to.Ptr(User{ID: 1})   // *User
+```
+
+Each call returns a distinct pointer — mutating `*p` does not affect the source. `Ptr` is never nil, even for zero values: `to.Ptr("")` returns a non-nil `*string` pointing at an empty string.
+
+On Go 1.26+, the `new(v)` builtin provides the same functionality at the language level. `to.Ptr` exists to give Bold Minds code the same ergonomic on Go 1.21–1.25 without depending on a third-party package.
 
 ## 🛡️ Safety guarantees
 
@@ -192,7 +206,7 @@ This is the language-level replacement for `to.Ptr`, `lo.ToPtr`, `ptr.To`, and s
 
 ## 🏎️ Performance
 
-Measured on Go 1.26 (Intel Ultra 9 275HX). Happy paths are sub-5 nanosecond with zero allocations; pointer dereferencing is effectively free.
+Measured on Go 1.26 (Intel Ultra 9 275HX; library targets Go 1.21+). Happy paths are sub-5 nanosecond with zero allocations; pointer creation and dereferencing are effectively free.
 
 ```
 BenchmarkStr_String-24         920353114    0.66 ns/op    0 B/op    0 allocs/op
@@ -245,6 +259,10 @@ func Type[T any](v any) (T, error)
 // Generic conversion with fallback. Returns fallback on any failure.
 func TypeOr[T any](v any, fallback T) T
 
+// Ptr returns a pointer to a fresh copy of v. Ergonomic one-call
+// alternative to the two-line "x := v; &x" pattern.
+func Ptr[T any](v T) *T
+
 // Safe pointer dereferencing. Val returns zero on nil pointer;
 // ValOr returns fallback on nil pointer.
 func Val[T any](p *T) T
@@ -273,5 +291,6 @@ MIT. See [LICENSE](LICENSE).
 
 - [`bold-minds/dig`](https://github.com/bold-minds/dig) — nested data navigation. Pairs naturally with `to`: `to.Int(dig.At(data, "count"))` when you need to dig into `any` trees and convert the leaf.
 - [`spf13/cast`](https://github.com/spf13/cast) — the established Go conversion library. Predates generics; uses `ToInt`/`ToIntE`-style naming. `to` is a leaner, generics-first, outcome-named take on the same problem space.
-- Go 1.26 `new(v)` builtin — the language-level replacement for `ptr.To`-style helpers. `to` does not ship a `Ptr` function because the language now provides it.
+- Go 1.26 `new(v)` builtin — the language-level equivalent of `to.Ptr(v)` on 1.26+. Both work, pick whichever matches your minimum Go version.
+- [`k8s.io/utils/ptr`](https://pkg.go.dev/k8s.io/utils/ptr) — the kubernetes ecosystem's widely-used pointer helper (`ptr.To`, `ptr.Deref`). `to.Ptr`/`to.Val`/`to.ValOr` cover the same ground with an outcome-naming convention consistent across Bold Minds libraries.
 - Go standard library `strconv` — the low-level primitive for string ↔ numeric conversions. `to` wraps it with outcome naming and `any` input handling.

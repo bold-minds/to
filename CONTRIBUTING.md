@@ -10,7 +10,7 @@ Every contribution is measured against the four Bold Minds principles: **outcome
 
 ## 🔧 Development Setup
 
-**Requirements:** Go 1.26 or later, Git, Bash.
+**Requirements:** Go 1.21 or later, Git, Bash.
 
 ```bash
 git clone https://github.com/bold-minds/to.git
@@ -97,7 +97,7 @@ go test -bench=. -benchmem ./...
 `to` is deliberately small. New additions must clear a high bar:
 
 1. Read the library's non-goals in [README.md](README.md) and [PRINCIPLES.md](https://github.com/bold-minds/oss/blob/main/PRINCIPLES.md).
-2. Prove the stdlib gap. Go 1.26's `strconv` and `new(v)` cover more than you might think.
+2. Prove the stdlib gap. Go's `strconv` package covers more than you might think, and on Go 1.26+ the `new(v)` builtin replaces many pointer-creation helpers.
 3. Show real-world evidence from a codebase.
 4. For new target types, first ask: can `Type[T]` already handle this?
 

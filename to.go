@@ -3,13 +3,26 @@
 // It offers outcome-named shortcuts for common target types (Str, Int, Bool,
 // F64) along with matching fallback variants (StrOr, IntOr, etc.), a generic
 // escape hatch (Type[T], TypeOr[T]) with typed error context, and safe
-// pointer dereferencing (Val, ValOr).
+// pointer creation and dereferencing (Ptr, Val, ValOr).
 //
 // Every function is nil-safe and never panics. Float-to-integer conversions
 // reject NaN, ±Inf, and out-of-range values rather than producing trap
 // values. Float-to-float narrowing rejects values that would overflow to
-// ±Inf. For pointer creation, use Go 1.26's new(v) builtin directly — this
-// package does not provide Ptr(v).
+// ±Inf.
+//
+// # Fallback semantics
+//
+// IntOr, BoolOr, F64Or, and TypeOr all return the supplied fallback when
+// conversion fails — including the empty string, which is explicitly
+// treated as "not a valid boolean/number" rather than as a valid zero
+// value. This makes the package well-suited for env-var and JSON-config
+// parsing, where an empty string overwhelmingly means "unset".
+//
+// StrOr is the exception: it returns the fallback only when v is nil.
+// For any non-nil input (including arbitrary structs) StrOr returns the
+// same result as Str — fmt/strconv-based formatting never fails, so the
+// fallback is unreachable. If you want "only accept real strings"
+// semantics, type-assert directly or call Type[string].
 //
 // For documentation and examples, see https://github.com/bold-minds/to.
 package to
@@ -102,9 +115,11 @@ func Int(v any) int {
 }
 
 // Bool converts v to a bool. Returns false on failure.
-// Supports bool, numeric types (non-zero→true), and strings. String parsing
-// is case-insensitive and accepts true/false, 1/0, t/f, yes/no, on/off.
-// The empty string is treated as false.
+// Supports bool, numeric types (non-zero→true), and strings. String
+// parsing is case-insensitive for the alphabetic forms and accepts
+// true/false, 1/0, yes/no, on/off. No whitespace trimming is performed;
+// callers should trim inputs first. The empty string is not a valid
+// boolean and causes failure (so BoolOr's fallback fires).
 func Bool(v any) bool {
 	result, _ := Type[bool](v)
 	return result
@@ -166,7 +181,9 @@ func F64Or(v any, fallback float64) float64 {
 // "1h30m" via time.ParseDuration.
 //
 // When T is an interface type (including any), the fast path returns v
-// unchanged if v already satisfies T.
+// unchanged if v already satisfies T. If v is nil and T is any, the zero
+// value (nil) is returned with no error; for non-empty interface targets,
+// nil input produces a ConversionError.
 func Type[T any](v any) (T, error) {
 	var zero T
 
@@ -193,10 +210,13 @@ func Type[T any](v any) (T, error) {
 		}
 	}
 
-	// Dispatch on target type
+	// Dispatch on target type. In each case the inner type assertion
+	// (any(x).(T)) is algebraically guaranteed to succeed because T is
+	// pinned by the matching case — so we discard the ok value.
 	switch any(zero).(type) {
 	case string:
-		return assignOrFail[T](Str(v))
+		r, _ := any(Str(v)).(T)
+		return r, nil
 	case int:
 		n, err := toInt64(v, "int")
 		if err != nil {
@@ -210,19 +230,22 @@ func Type[T any](v any) (T, error) {
 				Reason: "value exceeds int range",
 			}
 		}
-		return assignOrFail[T](int(n))
+		r, _ := any(int(n)).(T)
+		return r, nil
 	case int64:
 		n, err := toInt64(v, "int64")
 		if err != nil {
 			return zero, err
 		}
-		return assignOrFail[T](n)
+		r, _ := any(n).(T)
+		return r, nil
 	case float64:
 		n, err := toFloat64(v, "float64")
 		if err != nil {
 			return zero, err
 		}
-		return assignOrFail[T](n)
+		r, _ := any(n).(T)
+		return r, nil
 	case float32:
 		n, err := toFloat64(v, "float32")
 		if err != nil {
@@ -236,13 +259,15 @@ func Type[T any](v any) (T, error) {
 				Reason: "value exceeds float32 range",
 			}
 		}
-		return assignOrFail[T](float32(n))
+		r, _ := any(float32(n)).(T)
+		return r, nil
 	case bool:
 		b, err := toBool(v, "bool")
 		if err != nil {
 			return zero, err
 		}
-		return assignOrFail[T](b)
+		r, _ := any(b).(T)
+		return r, nil
 	}
 
 	// Fallback: named numeric types (time.Duration, type Port int64, …).
@@ -267,12 +292,24 @@ func TypeOr[T any](v any, fallback T) T {
 }
 
 // =============================================================================
-// Pointer dereferencing
+// Pointer creation and dereferencing
 // =============================================================================
+
+// Ptr returns a pointer to a fresh copy of v. It is the ergonomic
+// one-call alternative to the two-line temp-variable pattern:
+//
+//	x := v
+//	p := &x
+//
+// Equivalent to Go 1.26+'s new(v) builtin, but works on all supported
+// Go versions of this package.
+func Ptr[T any](v T) *T {
+	return &v
+}
 
 // Val returns the value pointed to by p, or the zero value of T if p is nil.
 // Val returns a copy; for large struct types, prefer reading fields directly
-// to avoid the copy cost. For creating pointers, use Go 1.26's new(v) builtin.
+// to avoid the copy cost.
 func Val[T any](p *T) T {
 	if p == nil {
 		var zero T
@@ -294,24 +331,6 @@ func ValOr[T any](p *T, fallback T) T {
 // =============================================================================
 // Internal conversion helpers
 // =============================================================================
-
-// assignOrFail type-asserts u to T. It exists to keep Type[T]'s switch cases
-// short: each case calls assignOrFail rather than repeating the ok/zero dance.
-// The assertion is guaranteed to succeed when called from a case whose target
-// type matches T concretely; the defensive zero-return path covers future
-// refactors or named-type shenanigans.
-func assignOrFail[T, U any](u U) (T, error) {
-	if r, ok := any(u).(T); ok {
-		return r, nil
-	}
-	var zero T
-	return zero, &ConversionError{
-		From:   fmt.Sprintf("%T", u),
-		To:     fmt.Sprintf("%T", zero),
-		Value:  u,
-		Reason: "internal type mismatch",
-	}
-}
 
 // convertNamed handles target types whose underlying kind is numeric but
 // which aren't matched by Type[T]'s concrete type switch — e.g., time.Duration
@@ -357,24 +376,18 @@ func convertNamed[T any](v any) (T, bool, error) {
 			return r, true, nil
 		}
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		n, err := toInt64(v, targetName)
+		n, err := toUint64(v, targetName)
 		if err != nil {
 			return zero, true, err
 		}
-		if n < 0 {
-			return zero, true, &ConversionError{
-				From: fromName, To: targetName, Value: v,
-				Reason: "negative value cannot be converted to unsigned type",
-			}
-		}
 		rv := reflect.New(rt).Elem()
-		if rv.OverflowUint(uint64(n)) {
+		if rv.OverflowUint(n) {
 			return zero, true, &ConversionError{
 				From: fromName, To: targetName, Value: v,
 				Reason: "value exceeds " + targetName + " range",
 			}
 		}
-		rv.SetUint(uint64(n))
+		rv.SetUint(n)
 		if r, ok := rv.Interface().(T); ok {
 			return r, true, nil
 		}
@@ -469,6 +482,16 @@ func toInt64(v any, target string) (int64, error) {
 	}
 }
 
+// maxInt64AsFloat is the smallest float64 that is out of int64 range.
+//
+// math.MaxInt64 (= 2^63 - 1) cannot be represented exactly as a float64 —
+// the nearest float64 rounds up to 2^63. If we compared x > math.MaxInt64,
+// the untyped constant would be promoted to float64 as 2^63, letting the
+// exact value x = 2^63 slip through to int64(x), whose Go-spec behavior
+// for an out-of-range float is implementation-defined (on amd64 it yields
+// INT64_MIN). So we reject anything >= 2^63.
+const maxInt64AsFloat = float64(1 << 63)
+
 // floatToInt64 truncates x toward zero after rejecting NaN, ±Inf, and values
 // outside the int64 range. A library whose tagline is "safe" must not return
 // INT64_MIN for NaN, which is what a plain int64(x) conversion does on amd64.
@@ -485,13 +508,121 @@ func floatToInt64(x float64, from, target string, orig any) (int64, error) {
 			Reason: "cannot convert Inf to integer",
 		}
 	}
-	if x > math.MaxInt64 || x < math.MinInt64 {
+	// Note: x < math.MinInt64 is fine as-is because -2^63 is exactly
+	// representable in float64, so the strict comparison correctly
+	// accepts the boundary. The upper bound must be >= maxInt64AsFloat
+	// because 2^63 - 1 is not representable; see maxInt64AsFloat.
+	if x >= maxInt64AsFloat || x < math.MinInt64 {
 		return 0, &ConversionError{
 			From: from, To: target, Value: orig,
 			Reason: "value exceeds int64 range",
 		}
 	}
 	return int64(x), nil
+}
+
+// toUint64 converts a numeric-ish value to uint64, mirroring toInt64 but
+// preserving the full uint64 range for unsigned named targets (e.g.,
+// type Size uint64). Negative sources are rejected.
+func toUint64(v any, target string) (uint64, error) {
+	switch x := v.(type) {
+	case uint:
+		return uint64(x), nil
+	case uint8:
+		return uint64(x), nil
+	case uint16:
+		return uint64(x), nil
+	case uint32:
+		return uint64(x), nil
+	case uint64:
+		return x, nil
+	case uintptr:
+		return uint64(x), nil
+	case int:
+		if x < 0 {
+			return 0, negativeToUnsignedError(v, target)
+		}
+		return uint64(x), nil
+	case int8:
+		if x < 0 {
+			return 0, negativeToUnsignedError(v, target)
+		}
+		return uint64(x), nil
+	case int16:
+		if x < 0 {
+			return 0, negativeToUnsignedError(v, target)
+		}
+		return uint64(x), nil
+	case int32:
+		if x < 0 {
+			return 0, negativeToUnsignedError(v, target)
+		}
+		return uint64(x), nil
+	case int64:
+		if x < 0 {
+			return 0, negativeToUnsignedError(v, target)
+		}
+		return uint64(x), nil
+	case float32:
+		return floatToUint64(float64(x), "float32", target, v)
+	case float64:
+		return floatToUint64(x, "float64", target, v)
+	case bool:
+		if x {
+			return 1, nil
+		}
+		return 0, nil
+	case string:
+		n, err := strconv.ParseUint(x, 10, 64)
+		if err != nil {
+			return 0, &ConversionError{
+				From: "string", To: target, Value: v,
+				Reason: "invalid numeric string", Cause: err,
+			}
+		}
+		return n, nil
+	}
+	return 0, &ConversionError{
+		From: fmt.Sprintf("%T", v), To: target, Value: v,
+		Reason: "unsupported source type",
+	}
+}
+
+func negativeToUnsignedError(v any, target string) error {
+	return &ConversionError{
+		From: fmt.Sprintf("%T", v), To: target, Value: v,
+		Reason: "negative value cannot be converted to unsigned type",
+	}
+}
+
+// maxUint64AsFloat is the smallest float64 strictly greater than math.MaxUint64.
+// math.MaxUint64 = 2^64 - 1 is not exactly representable as float64; the
+// nearest float64 rounds to 2^64. Any x >= 2^64 is out of uint64 range.
+const maxUint64AsFloat = float64(1 << 64)
+
+func floatToUint64(x float64, from, target string, orig any) (uint64, error) {
+	if math.IsNaN(x) {
+		return 0, &ConversionError{
+			From: from, To: target, Value: orig,
+			Reason: "cannot convert NaN to integer",
+		}
+	}
+	if math.IsInf(x, 0) {
+		return 0, &ConversionError{
+			From: from, To: target, Value: orig,
+			Reason: "cannot convert Inf to integer",
+		}
+	}
+	if x < 0 {
+		return 0, negativeToUnsignedError(orig, target)
+	}
+	if x >= maxUint64AsFloat {
+		return 0, &ConversionError{
+			From: from, To: target, Value: orig,
+			Reason: "value exceeds uint64 range",
+		}
+	}
+	return uint64(x), nil
 }
 
 func toFloat64(v any, target string) (float64, error) {
@@ -579,12 +710,16 @@ func toBool(v any, target string) (bool, error) {
 }
 
 // parseBoolString accepts true/false, 1/0, yes/no, on/off (all
-// case-insensitive for the alphabetic forms). The empty string is treated
-// as false — document-only convention; callers who want "" → error should
-// pre-filter.
+// case-insensitive for the alphabetic forms). No whitespace trimming is
+// performed; callers should trim first. The empty string is NOT treated
+// as a valid boolean: it returns a ConversionError so that BoolOr's
+// fallback fires for unset env vars and missing config values.
 func parseBoolString(x string, orig any, target string) (bool, error) {
 	if x == "" {
-		return false, nil
+		return false, &ConversionError{
+			From: "string", To: target, Value: orig,
+			Reason: "empty string is not a valid boolean",
+		}
 	}
 	switch x {
 	case "1":
@@ -607,6 +742,6 @@ func parseBoolString(x string, orig any, target string) (bool, error) {
 // Compile-time assertions that *ConversionError satisfies error and exposes
 // Unwrap for errors.Is/errors.As.
 var (
-	_ error                  = (*ConversionError)(nil)
+	_ error                       = (*ConversionError)(nil)
 	_ interface{ Unwrap() error } = (*ConversionError)(nil)
 )
