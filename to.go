@@ -67,7 +67,9 @@ func (e *ConversionError) Unwrap() error {
 
 // Str converts v to a string. Returns the empty string for nil input.
 // Common numeric and boolean types are formatted via strconv (allocation-free
-// where possible); other types fall back to fmt.Sprintf("%v", v).
+// where possible); []byte is converted directly; error and fmt.Stringer get
+// dedicated fast paths to avoid the reflection-heavy fmt.Sprintf fallback.
+// Any other type falls back to fmt.Sprintf("%v", v).
 func Str(v any) string {
 	if v == nil {
 		return ""
@@ -75,6 +77,8 @@ func Str(v any) string {
 	switch x := v.(type) {
 	case string:
 		return x
+	case []byte:
+		return string(x)
 	case bool:
 		return strconv.FormatBool(x)
 	case int:
@@ -101,6 +105,15 @@ func Str(v any) string {
 		return strconv.FormatFloat(float64(x), 'g', -1, 32)
 	case float64:
 		return strconv.FormatFloat(x, 'g', -1, 64)
+	}
+	// Interface-typed fast paths, checked after concrete cases so that
+	// common numeric/bool types never reach here. error is checked before
+	// fmt.Stringer because some types implement both (e.g., *url.Error).
+	if err, ok := v.(error); ok {
+		return err.Error()
+	}
+	if s, ok := v.(fmt.Stringer); ok {
+		return s.String()
 	}
 	return fmt.Sprintf("%v", v)
 }
@@ -358,64 +371,54 @@ func convertNamed[T any](v any) (T, bool, error) {
 		}
 	}
 
+	rv := reflect.New(rt).Elem()
 	switch rt.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		n, err := toInt64(v, targetName)
 		if err != nil {
 			return zero, true, err
 		}
-		rv := reflect.New(rt).Elem()
 		if rv.OverflowInt(n) {
-			return zero, true, &ConversionError{
-				From: fromName, To: targetName, Value: v,
-				Reason: "value exceeds " + targetName + " range",
-			}
+			return zero, true, numericOverflowError(fromName, targetName, v)
 		}
 		rv.SetInt(n)
-		if r, ok := rv.Interface().(T); ok {
-			return r, true, nil
-		}
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		n, err := toUint64(v, targetName)
 		if err != nil {
 			return zero, true, err
 		}
-		rv := reflect.New(rt).Elem()
 		if rv.OverflowUint(n) {
-			return zero, true, &ConversionError{
-				From: fromName, To: targetName, Value: v,
-				Reason: "value exceeds " + targetName + " range",
-			}
+			return zero, true, numericOverflowError(fromName, targetName, v)
 		}
 		rv.SetUint(n)
-		if r, ok := rv.Interface().(T); ok {
-			return r, true, nil
-		}
 	case reflect.Float32, reflect.Float64:
 		n, err := toFloat64(v, targetName)
 		if err != nil {
 			return zero, true, err
 		}
-		rv := reflect.New(rt).Elem()
 		if rv.OverflowFloat(n) {
-			return zero, true, &ConversionError{
-				From: fromName, To: targetName, Value: v,
-				Reason: "value exceeds " + targetName + " range",
-			}
+			return zero, true, numericOverflowError(fromName, targetName, v)
 		}
 		rv.SetFloat(n)
-		if r, ok := rv.Interface().(T); ok {
-			return r, true, nil
-		}
 	default:
 		return zero, false, nil
 	}
 
+	if r, ok := rv.Interface().(T); ok {
+		return r, true, nil
+	}
 	// Kind was numeric but the final assertion to T failed — surface a
 	// generic error rather than falling back to "unsupported conversion".
 	return zero, true, &ConversionError{
 		From: fromName, To: targetName, Value: v,
 		Reason: "internal type mismatch",
+	}
+}
+
+func numericOverflowError(fromName, targetName string, v any) error {
+	return &ConversionError{
+		From: fromName, To: targetName, Value: v,
+		Reason: "value exceeds " + targetName + " range",
 	}
 }
 

@@ -769,6 +769,38 @@ func TestBool_MixedCaseString(t *testing.T) {
 	}
 }
 
+func TestStr_ByteSliceAndInterfaceFastPaths(t *testing.T) {
+	// []byte should be converted directly without hitting fmt.Sprintf.
+	if got := to.Str([]byte("hello")); got != "hello" {
+		t.Errorf("Str([]byte) = %q, want hello", got)
+	}
+
+	// error fast path: the error's message is the string form.
+	if got := to.Str(errors.New("boom")); got != "boom" {
+		t.Errorf("Str(error) = %q, want boom", got)
+	}
+
+	// fmt.Stringer fast path: custom String() method is honored.
+	d := 5 * time.Second // time.Duration implements fmt.Stringer
+	if got := to.Str(d); got != "5s" {
+		t.Errorf("Str(time.Duration) = %q, want 5s", got)
+	}
+
+	// error is checked before fmt.Stringer: a type that implements both
+	// must use its Error() method, not String().
+	both := bothErrAndStringer{msg: "err-msg"}
+	if got := to.Str(both); got != "err-msg" {
+		t.Errorf("Str(error+Stringer) = %q, want err-msg (error wins)", got)
+	}
+}
+
+// bothErrAndStringer implements both error and fmt.Stringer with distinct
+// messages so we can verify Str picks the error path first.
+type bothErrAndStringer struct{ msg string }
+
+func (b bothErrAndStringer) Error() string  { return b.msg }
+func (b bothErrAndStringer) String() string { return "stringer-msg" }
+
 func TestStr_AllNumericKinds(t *testing.T) {
 	// Covers every branch of the strconv fast path in Str.
 	cases := []struct {
