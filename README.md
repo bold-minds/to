@@ -3,7 +3,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/bold-minds/to.svg)](https://pkg.go.dev/github.com/bold-minds/to)
 [![Build](https://img.shields.io/github/actions/workflow/status/bold-minds/to/test.yaml?branch=main&label=tests)](https://github.com/bold-minds/to/actions/workflows/test.yaml)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/bold-minds/to)](go.mod)
-[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/clairevnext/5035d319bc430a20509508aa888e2ce4/raw/coverage.json)](https://github.com/bold-minds/to/actions/workflows/test.yaml)
+[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/bold-admin/d173f3c3709c1ac53f0dd6d38d2cbac0/raw/coverage.json)](https://github.com/bold-minds/to/actions/workflows/test.yaml)
 
 **Safe Go value conversion — any value, any type, one call.**
 
